@@ -135,20 +135,73 @@ try {
   await clickText(/Next →/);
   await clickText(/Next →/);
   checks.push(["reached ready screen", /Ready to Party/i.test(root.innerHTML)]);
+  checks.push(["secret missions toggle present", /Secret Missions/i.test(root.innerHTML)]);
+
+  // shorten to a single round so we can drive the whole game to the finish
+  for (let i = 0; i < 7; i++) { const m = byText(/^−$/); if (m) await click(m, "rounds -"); }
+
   await clickText(/Start the Party/i);
   await tick(120);
   checks.push(["session started", /Standings|Play|Quests/i.test(root.innerHTML)]);
+  checks.push(["My Card button present", /My Card/i.test(root.innerHTML)]);
+
+  // --- open the personal "My Card" hub and exercise it ---
+  await clickText(/My Card/i);
+  checks.push(["My Card picker shows players", /Hand the phone|tap your name/i.test(root.innerHTML)]);
+  await click(byText(/^Ava$/), "pick Ava");
+  checks.push(["card shows secret mission section", /secret mission/i.test(root.innerHTML)]);
+  await clickText(/Tap to reveal/i);
+  checks.push(["mission revealed (claim button)", /pulled it off/i.test(root.innerHTML)]);
+  await clickText(/pulled it off/i);
+  checks.push(["mission self-claimed", /Marked done/i.test(root.innerHTML)]);
+  await clickText(/Done — pass it on/i);
 
   // deal round one
   await clickText(/Auto-Deal Round 1/i);
   await tick(1300); // wait out the dice-roll splash
   const dealt = root.innerHTML;
   checks.push(["round dealt (reveal/match shown)", /Round 1|Let's Play|Record result/i.test(dealt)]);
-
-  // dismiss the reveal overlay if present
   const letsPlay = byText(/Let's Play/i);
   if (letsPlay) { await click(letsPlay, "Let's Play"); await tick(120); }
   checks.push(["match cards visible", /Record result/i.test(root.innerHTML)]);
+
+  // --- record every match's result (winner control varies by format) ---
+  // search for an element matching `re` but only inside the open recorder modal
+  // (the match cards behind the modal also contain "Team A" etc.)
+  const inModal = (re) => {
+    const save = byText(/Save & Award/i);
+    if (!save) return null;
+    let panel = save;
+    while (panel.parentElement && !/Who won|assign places/i.test(panel.textContent || "")) panel = panel.parentElement;
+    return [...panel.querySelectorAll("button,div,span")]
+      .filter((el) => re.test((el.textContent || "").trim()))
+      .sort((a, b) => a.getElementsByTagName("*").length - b.getElementsByTagName("*").length)[0];
+  };
+  let guard = 0;
+  while (byText(/Record result/i) && guard++ < 10) {
+    await clickText(/Record result/i);
+    const winner = inModal(/🥇/) || inModal(/^✓?\s*Team A$/) || inModal(/The One/);
+    if (winner) await click(winner, "winner");
+    await clickText(/Save & Award/i);
+    await tick(80);
+  }
+  checks.push(["all results recorded", !byText(/Record result/i)]);
+
+  // --- finish the party → Mission Debrief → stars → podium ---
+  await clickText(/Finish Party/i);
+  await tick(150);
+  checks.push(["mission debrief shown", /MISSION DEBRIEF/i.test(root.innerHTML)]);
+  await click(byText(/Nailed it/i), "verdict");
+  await clickText(/Lock it in/i);
+  await tick(120);
+  // click through any bonus-star screens
+  let sg = 0;
+  while ((byText(/Next Star/i) || byText(/See Final Standings/i)) && sg++ < 8) {
+    await click(byText(/Next Star/i) || byText(/See Final Standings/i), "star advance");
+    await tick(120);
+  }
+  checks.push(["podium / champion shown", /CHAMPION/i.test(root.innerHTML)]);
+  checks.push(["secret missions summary on podium", /Secret missions/i.test(root.innerHTML)]);
 } catch (e) {
   checks.push(["flow walk completed", false]);
   errors.push("FLOW ERROR: " + (e && e.stack ? e.stack : e));

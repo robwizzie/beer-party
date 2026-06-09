@@ -121,6 +121,35 @@ const SIDE_QUESTS={
   photographer:{id:"photographer",name:"Party Paparazzi",emoji:"📸",needs:[],desc:"Capture the best group photo of the night — vote at the end."},
 };
 
+// ─── SECRET MISSIONS (Among-Us-style hidden tasks) ────────────────────────────
+// Each player is secretly assigned ONE mission for the whole night. Pull it off
+// WITHOUT getting called out and you bank the points at the final reveal. Get
+// caught and it's worth nothing. Points scale with difficulty (the spicier the
+// mission, the bigger the payoff) to reward bold play. Drinking is never required.
+const SECRET_POINTS={easy:2,medium:3,hard:4};
+const SECRET_MISSIONS=[
+  {id:"ice_cube",emoji:"🧊",name:"Ice Cold",diff:"medium",desc:"Drop an ice cube into someone's drink without them noticing."},
+  {id:"catchphrase",emoji:"🗣️",name:"The Catchphrase",diff:"hard",desc:"Pick a weird word and get 3 different people to say it out loud — without telling them why."},
+  {id:"high_fives",emoji:"🙌",name:"The Politician",diff:"easy",desc:"Land a high-five with 5 different people during a single round."},
+  {id:"paparazzi",emoji:"📸",name:"Candid Camera",diff:"easy",desc:"Get a photo of someone mid-drink before they can pose for it."},
+  {id:"pocket",emoji:"🫥",name:"Method Actor",diff:"hard",desc:"Keep one item (a grape, a bottle cap) hidden in your pocket the ENTIRE game and reveal it at the very end."},
+  {id:"parrot",emoji:"🦜",name:"The Parrot",diff:"medium",desc:"Repeat the last word someone says back to them, 3 separate times, without getting called out."},
+  {id:"sip_gift",emoji:"🥤",name:"Smooth Operator",diff:"medium",desc:"Convince someone to willingly give you a sip of their drink."},
+  {id:"no_names",emoji:"🚫",name:"Nameless",diff:"hard",desc:"Get through a whole round without saying anyone's real first name — nicknames only."},
+  {id:"chant",emoji:"📣",name:"Hype Man",diff:"easy",desc:"Start a chant or cheers that at least 3 other people join in on."},
+  {id:"rumor",emoji:"🤫",name:"Whisper Network",diff:"hard",desc:"Start a harmless rumor and have it make its way back to you by the end of the night."},
+  {id:"mime",emoji:"🔇",name:"The Mime",diff:"medium",desc:"Get through one entire mini-game communicating only with gestures — no words."},
+  {id:"borrowed",emoji:"🧥",name:"Undercover",diff:"medium",desc:"Wear an item that belongs to someone else (hat, jacket, sunglasses) for a full round."},
+  {id:"fact",emoji:"🧠",name:"The Plant",diff:"hard",desc:"Slip a made-up 'fun fact' into conversation and get someone to repeat it to a third person."},
+  {id:"compliment",emoji:"😊",name:"Secret Santa",diff:"easy",desc:"Give 3 different people a genuine compliment that makes them smile."},
+  {id:"seats",emoji:"🪑",name:"Drifter",diff:"easy",desc:"Sit or stand in 4 totally different spots over the course of the night."},
+  {id:"follow",emoji:"🧲",name:"The Magnet",diff:"hard",desc:"Get 3 people to follow you to a different room or area for no clear reason."},
+  {id:"cleanup",emoji:"♻️",name:"The Ghost",diff:"medium",desc:"Quietly tidy up 3 empty cups/cans without anyone thanking or noticing you."},
+  {id:"toast",emoji:"🥂",name:"Master of Ceremonies",diff:"easy",desc:"Get the whole group to stop and do a 'cheers' together at least once."},
+  {id:"sandbag",emoji:"🐢",name:"The Sandbagger",diff:"hard",desc:"Deliberately lose a drinking game on purpose without anyone realizing you threw it."},
+  {id:"background",emoji:"🤳",name:"Photobomber",diff:"medium",desc:"Sneak into the background of 3 different people's photos."},
+];
+
 // ─── ENGINE ──────────────────────────────────────────────────────────────────
 const uid=()=>Math.random().toString(36).slice(2,9);
 const eqOK=(eq,needs)=>needs.every(n=>n==="table"?(eq.table||0)>=1:!!eq[n]);
@@ -439,19 +468,27 @@ function bonusStarPoints(session){
   computeBonusStars(session).forEach(({winners})=>winners.forEach(id=>pts[id]+=2));
   return pts;
 }
+// Secret mission payouts (only counted once a mission is marked "done" at the reveal).
+const MISSION_BY_ID=Object.fromEntries(SECRET_MISSIONS.map(m=>[m.id,m]));
+function missionValue(taskId){const m=MISSION_BY_ID[taskId];return m?SECRET_POINTS[m.diff]||3:3;}
+function secretMissionPoints(session){
+  const pts={};session.players.forEach(p=>pts[p.id]=0);
+  (session.secretTasks||[]).forEach(t=>{if(t.status==="done")pts[t.playerId]=(pts[t.playerId]||0)+missionValue(t.taskId);});
+  return pts;
+}
 
 function calcMPScores(s){
   const sc={};s.players.forEach(p=>sc[p.id]=0);
   s.rounds?.forEach(rd=>rd.matches.forEach(m=>{if(m.result){const mp=matchPoints(m);Object.entries(mp).forEach(([i,v])=>sc[i]=(sc[i]||0)+v);}}));
   s.bonus?.forEach(b=>{if(b.first)sc[b.playerId]=(sc[b.playerId]||0)+2;else if(b.finished)sc[b.playerId]=(sc[b.playerId]||0)+1;});
-  if(s.status==="finished"){const bs=bonusStarPoints(s);Object.entries(bs).forEach(([i,v])=>sc[i]=(sc[i]||0)+v);}
+  if(s.status==="finished"){const bs=bonusStarPoints(s);Object.entries(bs).forEach(([i,v])=>sc[i]=(sc[i]||0)+v);const sm=secretMissionPoints(s);Object.entries(sm).forEach(([i,v])=>sc[i]=(sc[i]||0)+v);}
   return sc;
 }
 function calcTeamScores(s){
   const sc={};s.teams?.forEach(t=>sc[t.id]=0);
   s.rounds?.forEach(rd=>rd.matches.forEach(m=>{if(m.result){const mp=matchPoints(m);Object.entries(mp).forEach(([i,v])=>{const pl=s.players.find(p=>p.id===i);if(pl)sc[pl.teamId]=(sc[pl.teamId]||0)+v;});}}));
   s.bonus?.forEach(b=>{const pl=s.players.find(p=>p.id===b.playerId);if(!pl)return;if(b.first)sc[pl.teamId]=(sc[pl.teamId]||0)+2;else if(b.finished)sc[pl.teamId]=(sc[pl.teamId]||0)+1;});
-  if(s.status==="finished"){const bs=bonusStarPoints(s);Object.entries(bs).forEach(([i,v])=>{const pl=s.players.find(p=>p.id===i);if(pl)sc[pl.teamId]=(sc[pl.teamId]||0)+v;});}
+  if(s.status==="finished"){const bs=bonusStarPoints(s);Object.entries(bs).forEach(([i,v])=>{const pl=s.players.find(p=>p.id===i);if(pl)sc[pl.teamId]=(sc[pl.teamId]||0)+v;});const sm=secretMissionPoints(s);Object.entries(sm).forEach(([i,v])=>{const pl=s.players.find(p=>p.id===i);if(pl)sc[pl.teamId]=(sc[pl.teamId]||0)+v;});}
   return sc;
 }
 
@@ -813,6 +850,7 @@ function Setup({mode,onComplete,onBack}){
   const [teams,setTeams]=useState(TEAM_PRESETS.slice(0,4).map((t,i)=>({...t,id:"t"+i})));
   const [eq,setEq]=useState(()=>{const o={};Object.values(EQUIPMENT).forEach(e=>o[e.id]=e.default);return o;});
   const [targetRounds,setTargetRounds]=useState(8);
+  const [secretOn,setSecretOn]=useState(true);
 
   const isTeam=mode==="team";
   const steps=isTeam?["Players","Teams","Gear","Go"]:["Players","Gear","Go"];
@@ -832,12 +870,17 @@ function Setup({mode,onComplete,onBack}){
   const finish=()=>{
     const at=isTeam?teams.filter(t=>players.some(p=>p.teamId===t.id)):[];
     const activeBonus=Object.values(SIDE_QUESTS).filter(b=>eqOK(eq,b.needs));
+    // Secret missions: deal each player one unique mission (cycle if more players than missions).
+    const useSecret=secretOn&&mode!=="freeplay";
+    const shuffled=[...SECRET_MISSIONS].sort(()=>Math.random()-0.5);
+    const secretTasks=useSecret?players.map((p,i)=>({playerId:p.id,taskId:shuffled[i%shuffled.length].id,status:"pending"})):[];
     onComplete({
       id:uid(),name,mode,
       date:new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"}),
       players,teams:at,equipment:eq,rounds:[],targetRounds:mode==="freeplay"?null:targetRounds,
       bonus:players.flatMap(p=>activeBonus.map(b=>({playerId:p.id,bonusId:b.id,finished:false,first:false}))),
       bonusTypes:activeBonus.map(b=>b.id),
+      secretTasksOn:useSecret,secretTasks,
       status:"active",createdAt:Date.now(),
     });
   };
@@ -980,6 +1023,22 @@ function Setup({mode,onComplete,onBack}){
           </div>
         </Card>
       ); })()}
+
+      {mode!=="freeplay"&&(
+        <Card style={{margin:"0 0 12px",borderColor:secretOn?T.pink+"55":T.border,background:secretOn?T.pink+"0e":T.surface}}>
+          <div style={{display:"flex",alignItems:"center",gap:11}}>
+            <span style={{fontSize:26}}>🎭</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:14,fontWeight:800,color:T.text}}>Secret Missions</div>
+              <div style={{fontSize:12,color:T.textDim,marginTop:2}}>Each player gets one hidden mission for the night. Pull it off without getting caught to bank bonus points at the final reveal.</div>
+            </div>
+            <button onClick={()=>{Sound.tap();setSecretOn(v=>!v);}} className="bp-tap" style={{width:48,height:28,borderRadius:999,border:"none",cursor:"pointer",background:secretOn?T.pink:T.surface3,position:"relative",flexShrink:0,transition:"background .15s"}}>
+              <span style={{position:"absolute",top:3,left:secretOn?23:3,width:22,height:22,borderRadius:"50%",background:"#15131F",transition:"left .15s"}}/>
+            </button>
+          </div>
+          {secretOn&&<div style={{fontSize:11,color:T.textFaint,marginTop:9}}>Each player privately opens their card from 🎭 My Card during the game. Worth +2 to +4 depending on difficulty.</div>}
+        </Card>
+      )}
 
       <div style={{fontSize:11,fontWeight:800,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>Players</div>
       <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
@@ -1535,6 +1594,129 @@ function Recorder({match,session,onSave,onCancel}){
   );
 }
 
+// ─── MY CARD (personal Among-Us-style hub: assignment + secret mission + quests) ─
+const DIFF_COLOR={easy:T.green,medium:T.gold,hard:T.red};
+function MyCardModal({session,onUpdate,onClose,onRules}){
+  const [pid,setPid]=useState(null);
+  const [revealed,setRevealed]=useState(false);
+  const player=session.players.find(p=>p.id===pid);
+
+  // find this player's current-round assignment
+  const round=(session.rounds||[])[(session.rounds||[]).length-1];
+  const myMatch=round&&round.matches.find(m=>m.playerIds.includes(pid));
+  const benched=round&&!myMatch;
+  const myTeam=myMatch&&myMatch.teams[pid];
+  const teamLabel=(()=>{
+    if(!myMatch)return null;const f=FORMATS[myMatch.formatId];
+    if(["two_v_two","three_v_three","partners","split"].includes(f.id))return myTeam==="A"?"Team A":"Team B";
+    if(f.id==="one_v_all")return myTeam==="solo"?"👑 The One":"The Rest";
+    return null;
+  })();
+
+  // secret mission for this player
+  const myTask=(session.secretTasks||[]).find(t=>t.playerId===pid);
+  const mission=myTask&&MISSION_BY_ID[myTask.taskId];
+  const claimMission=()=>{
+    const next=myTask.status==="done"?"pending":"done";
+    onUpdate({...session,secretTasks:session.secretTasks.map(t=>t.playerId!==pid?t:{...t,status:next})});
+    Sound[next==="done"?"success":"tap"]();
+  };
+
+  // side quests for this player
+  const quests=(session.bonusTypes||[]).map(id=>SIDE_QUESTS[id]).filter(Boolean);
+  const toggleQuest=(bonusId)=>{
+    const bonus=session.bonus.map(b=>(b.bonusId===bonusId&&b.playerId===pid)?{...b,finished:!b.finished}:b);
+    onUpdate({...session,bonus});Sound.tap();
+  };
+  const questDone=(bonusId)=>session.bonus.find(b=>b.bonusId===bonusId&&b.playerId===pid)?.finished;
+
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(7,5,14,0.92)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:1200,padding:"16px",overflowY:"auto"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:T.surface,border:`1.5px solid ${T.border2}`,borderRadius:22,maxWidth:480,width:"100%",padding:"22px",boxShadow:T.shadowLg,marginTop:10,marginBottom:20}}>
+        {!player?(
+          <div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+              <H size={21}>🎭 My Card</H>
+              <button onClick={onClose} className="bp-tap" style={{background:T.surface2,border:`1.5px solid ${T.border2}`,borderRadius:12,width:34,height:34,cursor:"pointer",color:T.textDim,fontSize:16,fontFamily:"inherit"}}>✕</button>
+            </div>
+            <Sub>Hand the phone over and tap your name — your mission stays secret.</Sub>
+            <div className="bp-grid" style={{marginTop:16,gridTemplateColumns:"1fr 1fr"}}>
+              {session.players.map(p=>(
+                <button key={p.id} onClick={()=>{Sound.tap();setPid(p.id);setRevealed(false);}} className="bp-tap" style={{display:"flex",alignItems:"center",gap:9,padding:"11px 13px",borderRadius:14,border:`1.5px solid ${p.color}55`,background:p.color+"14",cursor:"pointer",fontFamily:"inherit"}}>
+                  <Avatar name={p.name} color={p.color} emoji={p.emoji} size={30}/>
+                  <span style={{fontSize:14,fontWeight:800,color:p.color}}>{p.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ):(
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:14}}>
+              <Avatar name={player.name} color={player.color} emoji={player.emoji} size={42} ring/>
+              <div style={{flex:1}}><div style={{fontWeight:900,fontSize:18,color:T.text}}>{player.name}'s Card</div><div style={{fontSize:12,color:T.textDim}}>Your private mission board</div></div>
+              <button onClick={()=>setPid(null)} className="bp-tap" title="Not you?" style={{background:T.surface2,border:`1.5px solid ${T.border2}`,borderRadius:11,padding:"7px 11px",cursor:"pointer",color:T.textDim,fontSize:12,fontWeight:700,fontFamily:"inherit"}}>↩ Not you?</button>
+            </div>
+
+            {/* THIS ROUND */}
+            <div style={{fontSize:11,fontWeight:800,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:7}}>🎲 This round</div>
+            {myMatch?(()=>{const g=GAMES[myMatch.gameId];const f=FORMATS[myMatch.formatId];return(
+              <div style={{display:"flex",alignItems:"center",gap:11,padding:"12px 14px",borderRadius:14,background:f.color+"12",border:`1.5px solid ${f.color}44`,marginBottom:16}}>
+                <span style={{fontSize:28}}>{g.emoji}</span>
+                <div style={{flex:1}}><div style={{fontWeight:800,fontSize:15,color:T.text}}>{g.name}</div><div style={{fontSize:12,fontWeight:700,color:f.color}}>{f.icon} {f.label}{teamLabel?` · ${teamLabel}`:""}</div></div>
+                <button onClick={()=>onRules(g,myMatch.formatId)} className="bp-tap" style={{background:T.surface2,border:"none",borderRadius:10,padding:"7px 11px",fontSize:12,fontWeight:700,color:T.textDim,cursor:"pointer",fontFamily:"inherit"}}>Rules</button>
+              </div>
+            );})():(
+              <div style={{padding:"12px 14px",borderRadius:14,background:T.surface2,border:`1px solid ${T.border}`,marginBottom:16,fontSize:13,color:T.textDim}}>{benched?"🪑 On deck this round — you ref, then rotate in next deal.":"No round dealt yet — sit tight!"}</div>
+            )}
+
+            {/* SECRET MISSION */}
+            {session.secretTasksOn&&mission&&(
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:11,fontWeight:800,color:T.pink,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:7}}>🎭 Your secret mission</div>
+                {!revealed?(
+                  <button onClick={()=>{Sound.pop();setRevealed(true);}} className="bp-tap" style={{width:"100%",padding:"22px 16px",borderRadius:16,border:`2px dashed ${T.pink}66`,background:T.pink+"10",cursor:"pointer",fontFamily:"inherit",color:T.pink}}>
+                    <div style={{fontSize:26,marginBottom:4}}>🙈</div>
+                    <div style={{fontSize:14,fontWeight:800}}>Tap to reveal — make sure nobody's looking!</div>
+                  </button>
+                ):(
+                  <div style={{padding:"15px 16px",borderRadius:16,background:T.pink+"12",border:`1.5px solid ${T.pink}55`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:7}}>
+                      <span style={{fontSize:26}}>{mission.emoji}</span>
+                      <span style={{fontWeight:900,fontSize:16,color:T.text,flex:1}}>{mission.name}</span>
+                      <Pill color={DIFF_COLOR[mission.diff]}>{mission.diff} · +{SECRET_POINTS[mission.diff]}</Pill>
+                    </div>
+                    <div style={{fontSize:13.5,color:T.text,lineHeight:1.5,marginBottom:12}}>{mission.desc}</div>
+                    <Btn full color={myTask.status==="done"?T.green:T.pink} variant={myTask.status==="done"?"solid":"soft"} onClick={claimMission}>{myTask.status==="done"?"✅ Marked done — confirmed at the reveal":"I pulled it off 😏"}</Btn>
+                    <div style={{fontSize:11,color:T.textFaint,textAlign:"center",marginTop:8}}>The group confirms (or busts you) at the final reveal. Then hide it again!</div>
+                    <Btn full variant="ghost" onClick={()=>setRevealed(false)} style={{marginTop:8,fontSize:12,padding:"8px"}}>🙈 Hide mission</Btn>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SIDE QUESTS */}
+            {quests.length>0&&(
+              <div style={{marginBottom:6}}>
+                <div style={{fontSize:11,fontWeight:800,color:T.gold,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:7}}>🏅 Side quests — optional, anytime</div>
+                <div style={{display:"grid",gap:7}}>
+                  {quests.map(q=>{const done=questDone(q.id);return(
+                    <button key={q.id} onClick={()=>toggleQuest(q.id)} className="bp-tap" style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:12,border:`1.5px solid ${done?T.green+"66":T.border}`,background:done?T.green+"12":T.surface2,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                      <span style={{fontSize:20}}>{q.emoji}</span>
+                      <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:T.text}}>{q.name}</div><div style={{fontSize:11,color:T.textFaint}}>{q.desc}</div></div>
+                      <span style={{fontSize:18,color:done?T.green:T.textFaint}}>{done?"✅":"⬜"}</span>
+                    </button>
+                  );})}
+                </div>
+              </div>
+            )}
+            <Btn full color={T.gold} onClick={onClose} style={{marginTop:14}}>Done — pass it on 👋</Btn>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── PARTY / TEAM SESSION ─────────────────────────────────────────────────────
 function Session({session,onUpdate,onEnd,onFinish,mode}){
   const [tab,setTab]=useState("play");
@@ -1547,6 +1729,7 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
   const [voting,setVoting]=useState(false);       // show vote picker
   const [editing,setEditing]=useState(false);      // show round editor
   const [dice,setDice]=useState(null);            // pending reveal during dice roll
+  const [showCard,setShowCard]=useState(false);   // personal "My Card" hub
   const isTeam=mode==="team";
   const scores=isTeam?calcTeamScores(session):calcMPScores(session);
   const rounds=session.rounds||[];
@@ -1604,6 +1787,7 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
           <div style={{fontSize:12,color:T.textDim,marginTop:2}}>{mode==="party"?"🎉 Party":isTeam?"🏆 Teams":"🕹️ Free Play"} · {session.players.length} players{target!=null?` · round ${Math.min(roundsDone||1,target)} of ${target}`:` · ${roundsDone} rounds`}</div>
         </div>
         <div style={{display:"flex",gap:6}}>
+          {mode!=="freeplay"&&<Btn color={T.pink} variant="soft" onClick={()=>{Sound.tap();setShowCard(true);}} style={{fontSize:12,padding:"6px 11px"}}>🎭 My Card</Btn>}
           {mode!=="freeplay"&&<Btn variant="ghost" onClick={()=>setShowSettings(true)} style={{fontSize:12,padding:"6px 10px"}}>⚙</Btn>}
           <Btn variant="ghost" onClick={onEnd} style={{fontSize:12,padding:"6px 11px"}}>Exit</Btn>
         </div>
@@ -1680,6 +1864,7 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
       {showSettings&&<SettingsModal session={session} roundsDone={roundsDone} onSetTarget={setTarget} onClose={()=>setShowSettings(false)}/>}
       {voting&&<VoteModal session={session} onPick={dealVotedRound} onClose={()=>setVoting(false)}/>}
       {editing&&currentRound&&<RoundEditor session={session} round={currentRound} onSave={applyEditedRound} onClose={()=>setEditing(false)} onRules={showRules}/>}
+      {showCard&&<MyCardModal session={session} onUpdate={onUpdate} onClose={()=>setShowCard(false)} onRules={showRules}/>}
     </div>
   );
 }
@@ -2057,9 +2242,12 @@ function Leaderboard({past,onBack}){
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
 // ─── END SCREEN (final results + bonus star reveal) ───────────────────────────
-function EndScreen({session,onHome}){
+function EndScreen({session,onHome,onUpdate}){
   const isTeam=session.mode==="team";
-  const [phase,setPhase]=useState("stars"); // stars → podium
+  const hasSecrets=session.secretTasksOn&&(session.secretTasks||[]).length>0;
+  const [phase,setPhase]=useState(hasSecrets?"debrief":"stars"); // [debrief] → stars → podium
+  // debrief working state: playerId -> "done" | "caught" | "skip"
+  const [verdicts,setVerdicts]=useState(()=>{const o={};(session.secretTasks||[]).forEach(t=>{o[t.playerId]=t.status==="done"?"done":t.status==="caught"?"caught":"skip";});return o;});
   const [starIdx,setStarIdx]=useState(0);
   const stars=computeBonusStars(session);
   const finalScores=isTeam?calcTeamScores({...session,status:"finished"}):calcMPScores({...session,status:"finished"});
@@ -2070,6 +2258,47 @@ function EndScreen({session,onHome}){
   const pl=id=>session.players.find(p=>p.id===id);
 
   const advance=()=>{ Sound.star(); if(starIdx<stars.length-1) setStarIdx(starIdx+1); else {Sound.win();setPhase("podium");} };
+
+  // ── MISSION DEBRIEF: reveal every secret mission and let the group rule on each ──
+  if(phase==="debrief"){
+    const VERDICTS=[["done","✅ Nailed it",T.green],["caught","🚨 Caught",T.red],["skip","— Didn't do it",T.textFaint]];
+    const confirmDebrief=()=>{
+      Sound.success();
+      const secretTasks=session.secretTasks.map(t=>({...t,status:verdicts[t.playerId]==="done"?"done":verdicts[t.playerId]==="caught"?"caught":"pending"}));
+      onUpdate&&onUpdate({...session,secretTasks});
+      setPhase("stars");
+    };
+    return (
+      <div style={{position:"fixed",inset:0,background:"rgba(8,6,16,0.97)",zIndex:1100,overflowY:"auto",padding:"30px 16px 28px"}}>
+        <div style={{maxWidth:600,margin:"0 auto"}}>
+          <div style={{textAlign:"center",marginBottom:18}}>
+            <div style={{fontSize:12,fontWeight:800,letterSpacing:"0.22em",color:T.textDim,textTransform:"uppercase",animation:"bpFade .4s both"}}>Before we crown a champion…</div>
+            <div style={{fontSize:34,fontWeight:900,color:T.pink,animation:"bpSlam .55s .1s both"}}>🎭 MISSION DEBRIEF</div>
+            <div style={{fontSize:13,color:T.textDim,marginTop:4}}>Reveal each secret mission out loud. Did they pull it off — or did someone bust them?</div>
+          </div>
+          <div style={{display:"grid",gap:10}}>
+            {session.secretTasks.map((t,i)=>{const p=pl(t.playerId);const m=MISSION_BY_ID[t.taskId];if(!p||!m)return null;const v=verdicts[t.playerId];return(
+              <div key={t.playerId} style={{background:T.surface,border:`1.5px solid ${v==="done"?T.green:v==="caught"?T.red:T.border}`,borderRadius:16,padding:"14px 15px",animation:"bpCardIn .5s both",animationDelay:`${0.1+i*0.06}s`}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:9}}>
+                  <Avatar name={p.name} color={p.color} emoji={p.emoji} size={34}/>
+                  <div style={{flex:1,minWidth:0}}><div style={{fontWeight:800,fontSize:15,color:T.text}}>{p.name}</div><div style={{fontSize:12,color:T.pink,fontWeight:700}}>{m.emoji} {m.name}</div></div>
+                  <Pill color={DIFF_COLOR[m.diff]}>+{SECRET_POINTS[m.diff]}</Pill>
+                </div>
+                <div style={{fontSize:13,color:T.textDim,lineHeight:1.45,marginBottom:11}}>{m.desc}</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7}}>
+                  {VERDICTS.map(([key,label,c])=>{const on=v===key;return(
+                    <button key={key} onClick={()=>{Sound.tap();setVerdicts(s=>({...s,[t.playerId]:key}));}} className="bp-tap" style={{padding:"9px 6px",borderRadius:11,border:`1.5px solid ${on?c:T.border}`,background:on?c+"22":T.surface2,color:on?c:T.textDim,fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{label}</button>
+                  );})}
+                </div>
+              </div>
+            );})}
+          </div>
+          <Btn color={T.gold} full onClick={confirmDebrief} style={{marginTop:20,fontSize:16,animation:"bpPop .45s both",animationDelay:"0.3s"}}>Lock it in → Bonus Stars</Btn>
+          <div style={{fontSize:11,color:T.textFaint,textAlign:"center",marginTop:9}}>Only clean, uncaught missions score. Honor system — the group's call is final.</div>
+        </div>
+      </div>
+    );
+  }
 
   if(phase==="stars"){
     const {star,winners,value}=stars[starIdx];
@@ -2148,6 +2377,24 @@ function EndScreen({session,onHome}){
             ))}
           </div>
         </Card>
+        {hasSecrets&&(()=>{const done=(session.secretTasks||[]).filter(t=>t.status==="done");return(
+          <Card style={{marginTop:12,borderColor:T.pink+"33"}}>
+            <div style={{fontSize:11,fontWeight:800,color:T.pink,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>🎭 Secret missions accomplished</div>
+            {done.length===0?(
+              <div style={{fontSize:13,color:T.textDim}}>Nobody pulled theirs off cleanly — brutal crowd. 🕵️</div>
+            ):(
+              <div style={{display:"grid",gap:7}}>
+                {done.map(t=>{const p=pl(t.playerId);const m=MISSION_BY_ID[t.taskId];return(
+                  <div key={t.playerId} style={{display:"flex",alignItems:"center",gap:9}}>
+                    <span style={{fontSize:18}}>{m.emoji}</span>
+                    <span style={{fontSize:13,fontWeight:700,color:T.text,flex:1}}>{p?.name} — {m.name}</span>
+                    <span style={{fontSize:12,fontWeight:800,color:T.green}}>+{SECRET_POINTS[m.diff]}</span>
+                  </div>
+                );})}
+              </div>
+            )}
+          </Card>
+        );})()}
         <Btn color={T.gold} full onClick={onHome} style={{marginTop:18,fontSize:16}}>🏠 Done — Back Home</Btn>
       </div>
     </div>
@@ -2364,7 +2611,7 @@ function Root(){
         {view==="mode"&&<ModeSelect onSelect={m=>{setSetupMode(m);setView("setup");}} onBack={()=>setView("home")}/>}
         {view==="setup"&&<Setup mode={setupMode} onComplete={launch} onBack={()=>setView("mode")}/>}
         {view==="session"&&s&&<Session session={s} mode={s.mode} onUpdate={upd} onEnd={end} onFinish={finish}/>}
-        {view==="finished"&&s&&<EndScreen session={s} onHome={closeFinished}/>}
+        {view==="finished"&&s&&<EndScreen session={s} onHome={closeFinished} onUpdate={upd}/>}
         {view==="history"&&<History past={state.past} onBack={()=>setView("home")}/>}
         {view==="leaderboard"&&<Leaderboard past={state.past} onBack={()=>setView("home")}/>}
 

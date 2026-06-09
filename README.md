@@ -32,6 +32,15 @@ API — no asset downloads.
 - **Pick the round** — auto-deal, vote it out loud, or **spin the wheel** 🎡.
 - **Customize everything** — edit any round with drag-and-drop teams, swap
   games/formats, recolor and re-character players.
+- **Secret Missions** 🎭 — each player gets one hidden, Among-Us-style mission
+  for the whole night (e.g. *"drop an ice cube in someone's drink unnoticed,"*
+  *"start a chant 3 people join"*). Pull it off without getting caught to bank
+  +2–4 bonus points at the end. Harder missions pay more.
+- **My Card** — a private, pass-the-phone hub where each player sees *their*
+  current game/team, *their* secret mission (reveal-gated so neighbors can't
+  peek), and *their* optional side quests as a tappable checklist.
+- **Mission Debrief** — at the finish, every secret mission is revealed and the
+  group rules "nailed it" or "caught" before the champion is crowned.
 - **Rewards & replay** — side quests, randomized end-of-night bonus stars, an
   animated standings reveal each round, a confetti podium, party history, and an
   all-time leaderboard across every party you've thrown.
