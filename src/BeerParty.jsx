@@ -333,7 +333,8 @@ function reteamMatch(match){
   if(["ffa","trio","duel"].includes(fmt.id)){ids.forEach(id=>teams[id]="solo");}
   else if(fmt.id==="one_v_all"){ids.forEach((id,i)=>teams[id]=i===0?"solo":"group");}
   else {const half=Math.ceil(ids.length/2);ids.forEach((id,i)=>teams[id]=i<half?"A":"B");}
-  return {...match,teams,result:null};
+  // changing teams/format invalidates any prior (or phone-reported) result
+  return {...match,teams,result:null,pendingResult:undefined};
 }
 // Which players in the round are NOT in any match (unassigned pool)
 function unassignedIds(round,allPlayers){
@@ -911,18 +912,28 @@ function PhoneApp({code}){
   const [tab,setTab]=useState("card");          // card | standings
   const [reporting,setReporting]=useState(null); // match being reported
   const clientRef=useRef(null);
+  const retryRef=useRef(null);
   useEffect(()=>{
     const c=makeClient({role:"phone",code,onStatus:(st)=>setStatus(s=>s==="noroom"?s:st),onMessage:(m)=>{
       if(m.t==="state"){setSession(m.state);setStatus("open");}
       else if(m.t==="joined")setStatus("open");
-      else if(m.t==="error"&&m.code==="no_room")setStatus("noroom");
+      else if(m.t==="error"&&m.code==="no_room"){
+        // the host may not have gone live yet — keep trying so the phone joins
+        // automatically the moment the room opens (no manual reload needed)
+        setStatus("noroom");
+        clearTimeout(retryRef.current);
+        retryRef.current=setTimeout(()=>c.send({t:"join",code}),2500);
+      }
       else if(m.t==="host_gone")setStatus("hostgone");
     }});
     clientRef.current=c;
-    return ()=>c.close();
+    return ()=>{clearTimeout(retryRef.current);c.close();};
   },[code]);
   const send=(intent)=>clientRef.current&&clientRef.current.send({t:"intent",intent});
   const player=session&&session.players.find(p=>p.id===pid);
+  // a reused room code from a past party may leave a pid that no longer exists
+  useEffect(()=>{ if(session&&pid&&!session.players.some(p=>p.id===pid)){setPid(null);try{localStorage.removeItem("bp_pid_"+code);}catch{}} },[session,pid,code]);
+  const finished=session&&session.status==="finished";
   const pickMe=(id)=>{setPid(id);try{localStorage.setItem("bp_pid_"+code,id);}catch{}Sound.tap();};
   const claimMission=(myTask)=>{Sound[myTask.status==="done"?"tap":"success"]();send({type:"claimMission",playerId:pid});};
   const toggleQuest=(bonusId)=>{Sound.tap();send({type:"toggleQuest",playerId:pid,bonusId});};
@@ -970,6 +981,7 @@ function PhoneApp({code}){
         <button onClick={()=>setPid(null)} className="bp-tap" style={{background:T.surface2,border:`1.5px solid ${T.border2}`,borderRadius:11,padding:"7px 11px",cursor:"pointer",color:T.textDim,fontSize:12,fontWeight:700,fontFamily:"inherit"}}>↩ Not you?</button>
       </div>
       {status==="hostgone"&&<Card style={{marginBottom:12,borderColor:T.orange+"55",background:T.orange+"12"}}><div style={{fontSize:13,color:T.orange,fontWeight:700}}>⚠ Lost the board — waiting for it to come back…</div></Card>}
+      {finished&&<Card style={{marginBottom:12,borderColor:T.gold+"66",background:`linear-gradient(135deg, ${T.gold}1c, ${T.surface})`}}><div style={{fontSize:14,color:T.gold,fontWeight:800,textAlign:"center"}}>🏁 That's a wrap — final standings! 🏆</div><div style={{fontSize:12,color:T.textDim,textAlign:"center",marginTop:3}}>Look up at the big screen for the podium.</div></Card>}
       <div style={{marginBottom:14}}><Tabs tabs={[["card","🎭 My Card"],["standings","📊 Standings"]]} active={tab} onChange={setTab}/></div>
       {tab==="card"?(
         <div>
@@ -1524,7 +1536,7 @@ function RoundEditor({session,round,onSave,onClose,onRules}){
         if(["ffa","trio","duel"].includes(fmt.id)) teams[pid]="solo";
         else if(fmt.id==="one_v_all") teams[pid]=Object.values(m.teams).includes("solo")?"group":"solo";
         else teams[pid]=team||"A";
-        return {...m,playerIds:ids,teams,result:null};
+        return {...m,playerIds:ids,teams,result:null,pendingResult:undefined};
       });
     });
   };
@@ -1963,7 +1975,7 @@ function MyCardModal({session,onUpdate,onClose,onRules}){
 }
 
 // ─── PARTY / TEAM SESSION ─────────────────────────────────────────────────────
-function Session({session,onUpdate,onEnd,onFinish,mode}){
+function Session({session,onUpdate,onEnd,onFinish,mode,live,liveStatus,onGoLive,onEndLive}){
   const [tab,setTab]=useState("play");
   const [rules,setRules]=useState(null);
   const showRules=(game,formatId)=>setRules({game,formatId:formatId||null});
@@ -1975,9 +1987,6 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
   const [editing,setEditing]=useState(false);      // show round editor
   const [dice,setDice]=useState(null);            // pending reveal during dice roll
   const [showCard,setShowCard]=useState(false);   // personal "My Card" hub
-  const [live,setLive]=useState(null);            // {code,ip,port,count} when broadcasting to phones
-  const clientRef=useRef(null);
-  const sessionRef=useRef(session); sessionRef.current=session; // latest state for the intent handler
   const isTeam=mode==="team";
   const scores=isTeam?calcTeamScores(session):calcMPScores(session);
   const rounds=session.rounds||[];
@@ -2033,22 +2042,6 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
   const nextAfterStandings=()=>{ setStandingsReveal(null); if(!atTarget) dealRound(); };
   const setTarget=(n)=>onUpdate({...session,targetRounds:n});
 
-  // ── Go Live: open a phone-companion room (this board stays source of truth) ──
-  const goLive=()=>{
-    if(clientRef.current)return;
-    Sound.advance();
-    clientRef.current=makeClient({role:"host",onMessage:(m)=>{
-      if(m.t==="hosted")setLive({code:m.code,ip:m.ip,port:m.port,count:0});
-      else if(m.t==="presence")setLive(l=>l?{...l,count:m.count}:l);
-      else if(m.t==="intent")onUpdate(applyIntent(sessionRef.current,m.intent));
-    }});
-  };
-  const endLive=()=>{Sound.tap();if(clientRef.current){clientRef.current.close();clientRef.current=null;}setLive(null);};
-  // keep phones in sync with the authoritative state
-  useEffect(()=>{ if(live&&clientRef.current) clientRef.current.send({t:"state",state:session}); },[session,live]);
-  // tidy up the socket if the session screen unmounts
-  useEffect(()=>()=>{ if(clientRef.current){clientRef.current.close();clientRef.current=null;} },[]);
-
   return (
     <div>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
@@ -2057,13 +2050,20 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
           <div style={{fontSize:12,color:T.textDim,marginTop:2}}>{mode==="party"?"🎉 Party":isTeam?"🏆 Teams":"🕹️ Free Play"} · {session.players.length} players{target!=null?` · round ${Math.min(roundsDone||1,target)} of ${target}`:` · ${roundsDone} rounds`}</div>
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
-          {mode!=="freeplay"&&<Btn color={T.blue} variant="soft" onClick={live?endLive:goLive} style={{fontSize:12,padding:"6px 11px"}}>{live?"📺 Live":"📺 Go Live"}</Btn>}
+          {mode!=="freeplay"&&<Btn color={T.blue} variant="soft" onClick={live?onEndLive:onGoLive} style={{fontSize:12,padding:"6px 11px"}}>{live?"📺 Live":(liveStatus&&liveStatus!=="open")?"📺 …":"📺 Go Live"}</Btn>}
           {mode!=="freeplay"&&<Btn color={T.pink} variant="soft" onClick={()=>{Sound.tap();setShowCard(true);}} style={{fontSize:12,padding:"6px 11px"}}>🎭 My Card</Btn>}
           {mode!=="freeplay"&&<Btn variant="ghost" onClick={()=>setShowSettings(true)} style={{fontSize:12,padding:"6px 10px"}}>⚙</Btn>}
           <Btn variant="ghost" onClick={onEnd} style={{fontSize:12,padding:"6px 11px"}}>Exit</Btn>
         </div>
       </div>
-      {live&&<LiveBanner live={live} onEnd={endLive}/>}
+      {live&&<LiveBanner live={live} onEnd={onEndLive}/>}
+      {!live&&liveStatus==="offline"&&(
+        <Card style={{marginBottom:12,borderColor:T.orange+"55",background:T.orange+"10"}}>
+          <div style={{fontSize:13,color:T.orange,fontWeight:800,marginBottom:3}}>📺 Can't reach the host server</div>
+          <div style={{fontSize:12,color:T.textDim}}>Phone companions need the host running. Quit, run <b style={{color:T.text}}>npm run host</b>, and open the board from the address it prints — then tap Go Live again.</div>
+          <Btn variant="ghost" onClick={onEndLive} style={{marginTop:9,fontSize:12,padding:"7px 11px"}}>Dismiss</Btn>
+        </Card>
+      )}
 
       {target!=null&&(
         <div style={{display:"flex",gap:3,marginBottom:12}}>
@@ -2803,6 +2803,9 @@ function Root(){
   const [setupMode,setSetupMode]=useState(null);
   const [settings,setSettings]=useState(loadSettings);
   const [showAudio,setShowAudio]=useState(false);
+  const [live,setLive]=useState(null);   // phone-companion room (lifted here so phones stay connected lobby → podium)
+  const [liveStatus,setLiveStatus]=useState(null); // connecting | open | offline (before a room is hosted)
+  const liveRef=useRef(null);
   useEffect(()=>{persist(state);},[state]);
   // apply + persist audio settings
   useEffect(()=>{
@@ -2819,9 +2822,26 @@ function Root(){
 
   const launch=useCallback((session)=>{Sound.deal();setState(prev=>{const past=prev.current?[...prev.past,{...prev.current,status:"completed"}]:prev.past;return{...prev,current:session,past};});setView("session");},[]);
   const upd=useCallback((s)=>setState(p=>({...p,current:s})),[]);
-  const end=useCallback(()=>{setState(prev=>{if(!prev.current)return prev;return{...prev,past:[...prev.past,{...prev.current,status:"completed"}],current:null};});setView("home");},[]);
+  // ── Phone-companion room (board = source of truth). Lifted to Root so the live
+  //    socket survives the session → finished → podium transition and phones can
+  //    follow the whole party (incl. final standings) on their own screens. ──
+  const goLive=useCallback(()=>{
+    if(liveRef.current)return;
+    Sound.advance();
+    setLiveStatus("connecting");
+    liveRef.current=makeClient({role:"host",onStatus:setLiveStatus,onMessage:(m)=>{
+      if(m.t==="hosted")setLive({code:m.code,ip:m.ip,port:m.port,count:0});
+      else if(m.t==="presence")setLive(l=>l?{...l,count:m.count}:l);
+      else if(m.t==="intent")setState(p=>p.current?{...p,current:applyIntent(p.current,m.intent)}:p);
+    }});
+  },[]);
+  const endLive=useCallback(()=>{Sound.tap();if(liveRef.current){liveRef.current.close();liveRef.current=null;}setLive(null);setLiveStatus(null);},[]);
+  // push the authoritative session to phones whenever it changes
+  useEffect(()=>{ if(live&&liveRef.current&&state.current) liveRef.current.send({t:"state",state:state.current}); },[state.current,live]);
+
+  const end=useCallback(()=>{endLive();setState(prev=>{if(!prev.current)return prev;return{...prev,past:[...prev.past,{...prev.current,status:"completed"}],current:null};});setView("home");},[endLive]);
   const finish=useCallback((session)=>{Sound.win();setState(p=>({...p,current:{...session,status:"finished"}}));setView("finished");},[]);
-  const closeFinished=useCallback(()=>{setState(prev=>{if(!prev.current)return prev;return{...prev,past:[...prev.past,prev.current],current:null};});setView("home");},[]);
+  const closeFinished=useCallback(()=>{endLive();setState(prev=>{if(!prev.current)return prev;return{...prev,past:[...prev.past,prev.current],current:null};});setView("home");},[endLive]);
 
   const s=state.current;
 
@@ -2834,7 +2854,7 @@ function Root(){
         {view==="home"&&<Home state={state} onNew={()=>setView("mode")} onContinue={()=>setView("session")} onHistory={()=>setView("history")} onLeaderboard={()=>setView("leaderboard")}/>}
         {view==="mode"&&<ModeSelect onSelect={m=>{setSetupMode(m);setView("setup");}} onBack={()=>setView("home")}/>}
         {view==="setup"&&<Setup mode={setupMode} onComplete={launch} onBack={()=>setView("mode")}/>}
-        {view==="session"&&s&&<Session session={s} mode={s.mode} onUpdate={upd} onEnd={end} onFinish={finish}/>}
+        {view==="session"&&s&&<Session session={s} mode={s.mode} onUpdate={upd} onEnd={end} onFinish={finish} live={live} liveStatus={liveStatus} onGoLive={goLive} onEndLive={endLive}/>}
         {view==="finished"&&s&&<EndScreen session={s} onHome={closeFinished} onUpdate={upd}/>}
         {view==="history"&&<History past={state.past} onBack={()=>setView("home")}/>}
         {view==="leaderboard"&&<Leaderboard past={state.past} onBack={()=>setView("home")}/>}

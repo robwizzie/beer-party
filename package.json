@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "host": "vite build && node server/host.mjs",
-    "test": "node test/smoke.mjs && node test/phone.mjs && node test/sync.mjs"
+    "test": "node test/smoke.mjs && node test/team.mjs && node test/freeplay.mjs && node test/phone.mjs && node test/sync.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

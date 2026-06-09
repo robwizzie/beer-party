@@ -30,12 +30,19 @@ const MIME = {
 // best LAN IPv4 so the QR points phones at this machine, not localhost
 export function lanIP() {
   const nets = networkInterfaces();
+  const cands = [];
   for (const name of Object.keys(nets)) {
     for (const ni of nets[name] || []) {
-      if (ni.family === "IPv4" && !ni.internal) return ni.address;
+      if (ni.family !== "IPv4" || ni.internal) continue;
+      if (ni.address.startsWith("169.254.")) continue; // link-local, not routable
+      const isLan = /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ni.address);
+      const isVirtual = /^(docker|veth|br-|vbox|vmnet|virbr|tun|tap|utun|zt|tailscale|wg)/i.test(name);
+      // prefer real private-LAN addresses; push docker/VPN/virtual adapters to the back
+      cands.push({ addr: ni.address, score: (isLan ? 2 : 0) - (isVirtual ? 3 : 0) });
     }
   }
-  return "localhost";
+  cands.sort((a, b) => b.score - a.score);
+  return cands.length ? cands[0].addr : "localhost";
 }
 
 // ── static file serving (with SPA fallback to index.html) ──────────────────────
@@ -52,7 +59,14 @@ async function serveStatic(req, res) {
     const s = await stat(filePath);
     if (s.isDirectory()) filePath = join(filePath, "index.html");
   } catch {
-    filePath = join(ROOT, "index.html"); // SPA fallback so /?room=CODE works
+    // Fall back to the SPA shell only for navigation routes (e.g. /?room=CODE).
+    // A missing *asset* must 404 — never serve index.html as a .js/.css, which
+    // would trip a MIME error and silently break the app.
+    if (extname(safe)) {
+      res.writeHead(404, { "content-type": "text/plain" });
+      return res.end("Not found");
+    }
+    filePath = join(ROOT, "index.html");
   }
   try {
     const body = await readFile(filePath);
@@ -126,8 +140,9 @@ export function attachHub(wss) {
       if (role === "host") {
         room.host = null;
         broadcastPhones(room, { t: "host_gone" });
-        // keep the room (and its state) briefly so the board can reconnect
-        room.timer = setTimeout(() => { if (!room.host) rooms.delete(code); }, 2 * 60 * 1000);
+        // keep the room (and its state) so the board can reconnect after a blip
+        // (laptop sleep, AP roam) without stranding phones that stayed connected
+        room.timer = setTimeout(() => { if (!room.host) rooms.delete(code); }, 10 * 60 * 1000);
       } else if (role === "phone") {
         room.clients.delete(ws);
         send(room.host, { t: "presence", count: room.clients.size });

@@ -15,7 +15,7 @@ npm install
 npm run dev      # solo / single-device dev server (http://localhost:5173)
 npm run build    # production build → dist/
 npm run preview  # preview the production build
-npm test         # headless tests: board flow + phone companion + sync protocol
+npm test         # headless tests: party + team + free-play flows, phone companion, sync protocol
 ```
 
 It's a single-page React app (Vite). All state lives in `localStorage`, so a
@@ -81,9 +81,12 @@ src/BeerParty.jsx   # the whole app (board engine + UI + phone companion)
 src/sync.js         # tiny WebSocket client (auto-reconnect, role announce)
 src/index.css       # base reset (the app injects its themed stylesheet at runtime)
 server/host.mjs     # Local-LAN host: serves dist/ + WebSocket room hub
-test/smoke.mjs      # board flow test (jsdom)
-test/phone.mjs      # phone companion test (jsdom + mock socket)
-test/sync.mjs       # host server / sync protocol test
+test/_harness.mjs   # shared jsdom mount + DOM-driving helpers
+test/smoke.mjs      # party-mode flow (setup → My Card → deal → debrief → podium)
+test/team.mjs       # team-mode flow (auto-balance → team scoring → podium)
+test/freeplay.mjs   # free-play flow (pick game → spin format)
+test/phone.mjs      # phone companion (join → claim → standings → report)
+test/sync.mjs       # host server / sync protocol
 ```
 
 Drink responsibly. 🍺
