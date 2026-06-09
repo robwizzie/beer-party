@@ -12,15 +12,34 @@ zero-equipment social games that anyone can join.
 
 ```bash
 npm install
-npm run dev      # start the dev server (http://localhost:5173)
+npm run dev      # solo / single-device dev server (http://localhost:5173)
 npm run build    # production build → dist/
 npm run preview  # preview the production build
-npm test         # headless smoke test (mounts the app, walks the core flow)
+npm test         # headless tests: board flow + phone companion + sync protocol
 ```
 
 It's a single-page React app (Vite). All state lives in `localStorage`, so a
 party persists across reloads. Sound is synthesized live with the Web Audio
 API — no asset downloads.
+
+### 📺 Phone companions (Local-LAN host)
+
+Want everyone on their own phone? Run the **host** on the laptop you're casting
+to the TV:
+
+```bash
+npm run host     # builds, then serves the app + a WebSocket room hub on :8080
+```
+
+- Open the printed `http://localhost:8080` on the **laptop/TV** — that's the
+  **board** (the single source of truth for scores and state).
+- Start a party, then tap **📺 Go Live**. A **room code + QR** appears.
+- Everyone on the **same wifi** scans the QR (or visits `http://<laptop-ip>:8080`
+  and enters the code) to open their **own card** on their phone — their game
+  this round, their **secret mission** (reveal-gated), and their side quests.
+- Phones send *intents*; the board decides and re-broadcasts state. No cloud, no
+  accounts, works offline on the local network. The app still runs fully
+  single-device if you never go live.
 
 ## What's inside
 
@@ -50,9 +69,13 @@ API — no asset downloads.
 ```
 index.html          # app entry
 src/main.jsx        # React mount
-src/BeerParty.jsx   # the whole app (engine + UI)
+src/BeerParty.jsx   # the whole app (board engine + UI + phone companion)
+src/sync.js         # tiny WebSocket client (auto-reconnect, role announce)
 src/index.css       # base reset (the app injects its themed stylesheet at runtime)
-test/smoke.mjs      # jsdom smoke/flow test
+server/host.mjs     # Local-LAN host: serves dist/ + WebSocket room hub
+test/smoke.mjs      # board flow test (jsdom)
+test/phone.mjs      # phone companion test (jsdom + mock socket)
+test/sync.mjs       # host server / sync protocol test
 ```
 
 Drink responsibly. 🍺
