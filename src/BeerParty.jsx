@@ -1,22 +1,34 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 /* ============================================================================
-   BEER PARTY  —  dark-mode party game platform with Mario-Party randomness
+   BEER PARTY  —  a real-life Mario-Party-style party game platform.
+   "Midnight Carnival" theme: electric, joyful, board-game vibrant. Drinking optional.
 ============================================================================ */
 
 const T = {
-  bg:"#13111E", bg2:"#191527", surface:"#221D33", surface2:"#2C2542", surface3:"#392F54",
-  border:"#3D3458", border2:"#52466F",
-  text:"#F6F3FC", textDim:"#ADA4C9", textFaint:"#766C97",
-  gold:"#FFCB45", red:"#FF5D72", blue:"#46A6FF", green:"#5BDB91",
-  purple:"#B093FF", pink:"#FF7FC8", teal:"#3FE0CB", orange:"#FF9D4D",
-  ink:"#14111F", // dark text on bright buttons
-  shadow:"0 6px 20px -6px rgba(0,0,0,0.55)",
-  shadowLg:"0 18px 50px -12px rgba(0,0,0,0.6)",
+  // deep midnight-purple base so the bright candy accents glow on top
+  bg:"#0C0A1A", bg2:"#15102B", surface:"#1E1838", surface2:"#272047", surface3:"#352A5E",
+  border:"#3E3268", border2:"#564679",
+  text:"#FBF8FF", textDim:"#BCB1DE", textFaint:"#8175A8",
+  // brilliant, saturated "arcade candy" accents
+  gold:"#FFC93C", red:"#FF566F", blue:"#3FA9FF", green:"#4DE08C",
+  purple:"#BB8CFF", pink:"#FF6FC4", teal:"#2EE6D2", orange:"#FF9A3D",
+  ink:"#100E1F", // dark text on bright buttons
+  shadow:"0 6px 22px -6px rgba(0,0,0,0.6)",
+  shadowLg:"0 20px 56px -12px rgba(0,0,0,0.66)",
 };
-// gradient helper for a color → slightly lighter sibling
-const grad=(c)=>`linear-gradient(150deg, ${c} 0%, ${c}cc 100%)`;
+// shade a hex toward white (p>0) or black (p<0) — used for glossy gradients & glows
+const shade=(hex,p)=>{
+  const n=parseInt(hex.slice(1),16);let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  const t=p<0?0:255,a=Math.abs(p);
+  r=Math.round((t-r)*a+r);g=Math.round((t-g)*a+g);b=Math.round((t-b)*a+b);
+  return "#"+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+};
+// glossy "candy" gradient — bright sheen up top fading to a richer base
+const grad=(c)=>`linear-gradient(178deg, ${shade(c,0.26)} 0%, ${c} 46%, ${shade(c,-0.14)} 100%)`;
 const PCOLORS=[T.red,T.blue,T.green,T.gold,T.pink,T.teal,T.purple,T.orange,"#6FB8FF","#86E36B","#C9A14A","#FF8FA3","#7FE0D4","#B79CFF","#FFB36B","#FF6F91"];
+// Pick-a-character roster — every player becomes a little party "token" (Mario-Party style).
+const CHARACTERS=["🦊","🐸","🐵","🐯","🦄","🐙","🐲","🐼","🦁","🐧","🦖","🐝","🦈","🐰","🐨","🦉","🐶","🐱","🐮","🦝","🐷","🐔","🦅","🐢"];
 const TEAM_PRESETS=[
   {name:"Red Rockets",color:T.red},{name:"Blue Bombers",color:T.blue},
   {name:"Green Goblins",color:T.green},{name:"Gold Gladiators",color:T.gold},
@@ -460,7 +472,7 @@ const Tabs=({tabs,active,onChange})=>(
     {tabs.map(([k,l])=><button key={k} onClick={()=>onChange(k)} className="bp-tap" style={{flex:"1 1 auto",padding:"8px 12px",borderRadius:10,fontSize:13,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",border:"none",fontFamily:"inherit",background:active===k?grad(T.purple):"transparent",color:active===k?T.ink:T.textDim,boxShadow:active===k?`0 3px 10px -3px ${T.purple}aa`:"none",transition:"all .18s"}}>{l}</button>)}
   </div>
 );
-const Avatar=({name,color,size=34,ring})=>(<div style={{width:size,height:size,minWidth:size,borderRadius:"50%",background:`radial-gradient(circle at 35% 30%, ${color}55, ${color}22)`,border:`2px solid ${ring?color:color+"77"}`,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:Math.round(size*0.44),fontWeight:900,color,flexShrink:0,lineHeight:1,fontFamily:"'Outfit',sans-serif",overflow:"hidden",boxShadow:ring?`0 0 0 3px ${color}33, 0 2px 8px -2px ${color}aa`:"none"}}><span style={{lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",width:"100%",height:"100%"}}>{name.slice(0,1).toUpperCase()}</span></div>);
+const Avatar=({name,color,size=34,ring,emoji})=>(<div style={{width:size,height:size,minWidth:size,borderRadius:"50%",background:`radial-gradient(circle at 35% 28%, ${shade(color,0.35)}, ${color}33 70%, ${color}22)`,border:`2px solid ${ring?color:color+"88"}`,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:Math.round(size*(emoji?0.56:0.44)),fontWeight:900,color,flexShrink:0,lineHeight:1,fontFamily:"'Baloo 2','Outfit',sans-serif",overflow:"hidden",boxShadow:ring?`0 0 0 3px ${color}33, 0 2px 10px -2px ${color}cc`:"inset 0 1px 1px rgba(255,255,255,0.18)"}}><span style={{lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",width:"100%",height:"100%"}}>{emoji||name.slice(0,1).toUpperCase()}</span></div>);
 const H=({children,size=20,style={}})=><h2 style={{fontSize:size,fontWeight:900,letterSpacing:"-0.02em",margin:0,color:T.text,...style}}>{children}</h2>;
 const Sub=({children})=><p style={{fontSize:13,color:T.textDim,margin:"3px 0 0",lineHeight:1.5}}>{children}</p>;
 const Line=()=><div style={{height:1,background:`linear-gradient(90deg,transparent,${T.border},transparent)`,margin:"18px 0"}} />;
@@ -524,6 +536,41 @@ function Confetti({count=120,duration=3200}){
           animation:`bpConfFall ${p.dur}s ${p.delay}s cubic-bezier(.3,.6,.5,1) forwards`,
           transform:`translateX(${p.drift}px)`,boxShadow:`0 0 4px ${p.color}88`}}/>
       ))}
+    </div>
+  );
+}
+
+// ─── AMBIENT PARTY BACKGROUND (living "carnival board" behind everything) ─────
+// Slow-drifting aurora orbs + a rising field of party tokens. Pure CSS motion,
+// fixed behind the app, never intercepts taps, and goes calm under reduced-motion.
+const BG_TOKENS=["🪙","⭐","🍺","🎲","✨","🎉","🏆","🍻","🥤","💫","🎯","👑"];
+function PartyBackground(){
+  const reduce=typeof window!=="undefined"&&window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const bits=useRef(null);
+  if(!bits.current){
+    bits.current=Array.from({length:reduce?0:16},(_,i)=>({
+      id:i,left:Math.random()*100,size:15+Math.random()*22,delay:Math.random()*16,
+      dur:16+Math.random()*16,drift:(Math.random()-0.5)*80,spin:Math.random()>0.5,
+      emoji:BG_TOKENS[i%BG_TOKENS.length],
+    }));
+  }
+  return (
+    <div aria-hidden style={{position:"fixed",inset:0,zIndex:0,overflow:"hidden",pointerEvents:"none"}}>
+      {/* drifting aurora orbs */}
+      <div style={{position:"absolute",top:"-14%",left:"-12%",width:"60vw",height:"60vw",borderRadius:"50%",background:`radial-gradient(circle, ${T.purple}3a, transparent 66%)`,filter:"blur(8px)",animation:reduce?"none":"bpOrbA 22s ease-in-out infinite"}}/>
+      <div style={{position:"absolute",top:"6%",right:"-16%",width:"55vw",height:"55vw",borderRadius:"50%",background:`radial-gradient(circle, ${T.pink}30, transparent 66%)`,filter:"blur(8px)",animation:reduce?"none":"bpOrbB 26s ease-in-out infinite"}}/>
+      <div style={{position:"absolute",bottom:"-20%",left:"22%",width:"62vw",height:"62vw",borderRadius:"50%",background:`radial-gradient(circle, ${T.teal}24, transparent 66%)`,filter:"blur(8px)",animation:reduce?"none":"bpOrbC 30s ease-in-out infinite"}}/>
+      <div style={{position:"absolute",top:"34%",left:"40%",width:"42vw",height:"42vw",borderRadius:"50%",background:`radial-gradient(circle, ${T.blue}1f, transparent 64%)`,filter:"blur(10px)",animation:reduce?"none":"bpOrbA 34s ease-in-out infinite reverse"}}/>
+      {/* faint board-grid texture */}
+      <div style={{position:"absolute",inset:0,opacity:0.05,backgroundImage:`linear-gradient(${T.purple}55 1px,transparent 1px),linear-gradient(90deg,${T.purple}55 1px,transparent 1px)`,backgroundSize:"44px 44px",maskImage:"radial-gradient(circle at 50% 40%, #000 30%, transparent 78%)",WebkitMaskImage:"radial-gradient(circle at 50% 40%, #000 30%, transparent 78%)"}}/>
+      {/* rising party tokens */}
+      {bits.current.map(b=>(
+        <div key={b.id} style={{position:"absolute",bottom:-40,left:`${b.left}%`,fontSize:b.size,opacity:0.16,filter:"saturate(1.2)",animation:`bpRise ${b.dur}s ${b.delay}s linear infinite`,"--drift":`${b.drift}px`}}>
+          <span style={{display:"inline-block",animation:b.spin?`bpTokenSpin ${6+b.id%5}s linear infinite`:"none"}}>{b.emoji}</span>
+        </div>
+      ))}
+      {/* subtle vignette to seat content */}
+      <div style={{position:"absolute",inset:0,background:`radial-gradient(120% 90% at 50% -10%, transparent 40%, ${T.bg} 100%)`}}/>
     </div>
   );
 }
@@ -771,8 +818,11 @@ function Setup({mode,onComplete,onBack}){
   const steps=isTeam?["Players","Teams","Gear","Go"]:["Players","Gear","Go"];
   const minP=mode==="freeplay"?2:3;
 
-  const addP=()=>{const n=pIn.trim();if(!n)return;setPlayers(p=>[...p,{id:"p_"+uid(),name:n,teamId:null,color:PCOLORS[p.length%PCOLORS.length]}]);setPIn("");};
+  const addP=()=>{const n=pIn.trim();if(!n)return;setPlayers(p=>{const used=new Set(p.map(x=>x.emoji));const emoji=CHARACTERS.find(c=>!used.has(c))||CHARACTERS[p.length%CHARACTERS.length];return [...p,{id:"p_"+uid(),name:n,teamId:null,color:PCOLORS[p.length%PCOLORS.length],emoji}];});setPIn("");Sound.pop();};
   const rmP=id=>setPlayers(p=>p.filter(x=>x.id!==id));
+  const [editChar,setEditChar]=useState(null); // player id whose character picker is open
+  const cycleColor=(id)=>setPlayers(p=>p.map(x=>x.id!==id?x:{...x,color:PCOLORS[(PCOLORS.indexOf(x.color)+1)%PCOLORS.length]}));
+  const pickChar=(id,emoji)=>{setPlayers(p=>p.map(x=>x.id!==id?x:{...x,emoji}));Sound.tap();};
   const autoBalance=()=>{const s=[...players].sort(()=>Math.random()-0.5);const nt=Math.max(2,Math.ceil(s.length/teamSize));setPlayers(s.map((p,i)=>({...p,teamId:"t"+(i%nt)})));};
   const assignT=(pid,tid)=>setPlayers(p=>p.map(x=>x.id===pid?{...x,teamId:tid}:x));
 
@@ -807,12 +857,23 @@ function Setup({mode,onComplete,onBack}){
         <input value={pIn} onChange={e=>setPIn(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addP()} placeholder="Player name…" style={{flex:1}}/>
         <Btn onClick={addP} disabled={!pIn.trim()}>Add</Btn>
       </div>
+      {players.length>0&&<div style={{fontSize:11,color:T.textFaint,marginBottom:7}}>Tap a character to change it, or the color dot to recolor.</div>}
       <div style={{display:"grid",gap:6,marginBottom:8}}>
         {players.map((p,i)=>(
-          <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:T.surface2,borderRadius:11}}>
-            <Avatar name={p.name} color={p.color} size={26}/>
-            <span style={{flex:1,fontSize:14,fontWeight:600,color:T.text}}>#{i+1} {p.name}</span>
-            <button onClick={()=>rmP(p.id)} style={{background:"transparent",border:"none",cursor:"pointer",color:T.textFaint,fontSize:15,fontFamily:"inherit"}}>✕</button>
+          <div key={p.id}>
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:T.surface2,borderRadius:editChar===p.id?"11px 11px 0 0":11,border:`1px solid ${editChar===p.id?p.color+"66":"transparent"}`}}>
+              <button onClick={()=>{Sound.tap();setEditChar(editChar===p.id?null:p.id);}} className="bp-tap" title="Change character" style={{border:"none",background:"transparent",cursor:"pointer",padding:0,borderRadius:"50%"}}><Avatar name={p.name} color={p.color} emoji={p.emoji} size={30}/></button>
+              <span style={{flex:1,fontSize:14,fontWeight:700,color:T.text}}>#{i+1} {p.name}</span>
+              <button onClick={()=>{Sound.tap();cycleColor(p.id);}} className="bp-tap" title="Recolor" style={{width:22,height:22,borderRadius:"50%",border:`2px solid ${shade(p.color,0.3)}`,background:grad(p.color),cursor:"pointer",boxShadow:`0 0 8px -1px ${p.color}aa`}}/>
+              <button onClick={()=>rmP(p.id)} style={{background:"transparent",border:"none",cursor:"pointer",color:T.textFaint,fontSize:15,fontFamily:"inherit"}}>✕</button>
+            </div>
+            {editChar===p.id&&(
+              <div style={{display:"flex",flexWrap:"wrap",gap:5,padding:"10px 12px",background:T.surface,borderRadius:"0 0 11px 11px",border:`1px solid ${p.color}66`,borderTop:"none"}}>
+                {CHARACTERS.map(c=>{const taken=players.some(x=>x.id!==p.id&&x.emoji===c);return(
+                  <button key={c} disabled={taken} onClick={()=>pickChar(p.id,c)} className="bp-tap" style={{fontSize:20,width:36,height:36,borderRadius:10,cursor:taken?"not-allowed":"pointer",border:`1.5px solid ${p.emoji===c?p.color:T.border}`,background:p.emoji===c?p.color+"22":T.surface2,opacity:taken?0.25:1,fontFamily:"inherit",lineHeight:1}}>{c}</button>
+                );})}
+              </div>
+            )}
           </div>
         ))}
         {players.length===0&&<p style={{fontSize:13,color:T.textFaint,textAlign:"center",padding:"10px 0"}}>Add everyone who's playing.</p>}
@@ -837,7 +898,7 @@ function Setup({mode,onComplete,onBack}){
           <div style={{fontSize:12,color:T.textDim,fontWeight:700,marginBottom:8}}>Unassigned:</div>
           {players.filter(p=>!p.teamId).map(p=>(
             <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-              <Avatar name={p.name} color={p.color} size={24}/>
+              <Avatar name={p.name} color={p.color} emoji={p.emoji} size={24}/>
               <span style={{fontSize:13,fontWeight:600,flex:1,color:T.text}}>{p.name}</span>
               <select value="" onChange={e=>assignT(p.id,e.target.value)} style={{fontSize:12}}><option value="" disabled>Assign…</option>{teams.slice(0,Math.ceil(players.length/teamSize)).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select>
             </div>
@@ -922,7 +983,7 @@ function Setup({mode,onComplete,onBack}){
 
       <div style={{fontSize:11,fontWeight:800,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>Players</div>
       <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-        {players.map(p=><div key={p.id} style={{display:"flex",alignItems:"center",gap:5,padding:"3px 9px",borderRadius:999,background:p.color+"18",border:`1px solid ${p.color}44`}}><Avatar name={p.name} color={p.color} size={18}/><span style={{fontSize:12,fontWeight:700,color:p.color}}>{p.name}</span></div>)}
+        {players.map(p=><div key={p.id} style={{display:"flex",alignItems:"center",gap:5,padding:"3px 9px",borderRadius:999,background:p.color+"18",border:`1px solid ${p.color}44`}}><Avatar name={p.name} color={p.color} emoji={p.emoji} size={18}/><span style={{fontSize:12,fontWeight:700,color:p.color}}>{p.name}</span></div>)}
       </div>
     </div>
   );
@@ -966,7 +1027,7 @@ function Setup({mode,onComplete,onBack}){
 function RevealChip({p,delay}){
   return (
     <span style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:13,fontWeight:700,padding:"4px 11px 4px 5px",borderRadius:999,background:p.color+"22",color:p.color,animation:"bpPop .42s both",animationDelay:`${delay}s`}}>
-      <Avatar name={p.name} color={p.color} size={20}/>{p.name}
+      <Avatar name={p.name} color={p.color} emoji={p.emoji} size={20}/>{p.name}
     </span>
   );
 }
@@ -1074,28 +1135,46 @@ function VoteModal({session,onPick,onClose}){
   };
   const opts=Object.values(VOTE_OPTIONS).filter(o=>can(o.id));
   const [picked,setPicked]=useState(null);
+  const [spinning,setSpinning]=useState(false);
+  const tmr=useRef(null);
+  useEffect(()=>()=>clearTimeout(tmr.current),[]);
+  // Spin-the-wheel: rapidly flicker the highlight, decelerate, land on a random option.
+  const spin=()=>{
+    if(spinning||!opts.length)return;
+    setSpinning(true);setPicked(null);
+    const final=opts[Math.floor(Math.random()*opts.length)];
+    let tick=0,speed=70;const maxT=18+Math.floor(Math.random()*8);
+    const step=()=>{
+      Sound.tap();
+      setPicked(opts[tick%opts.length].id);tick++;
+      if(tick<maxT){if(tick>maxT*0.55)speed+=28;tmr.current=setTimeout(step,speed);}
+      else{setPicked(final.id);setSpinning(false);Sound.star();}
+    };
+    tmr.current=setTimeout(step,0);
+  };
   return (
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(8,6,16,0.9)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"16px",overflowY:"auto"}}>
       <div onClick={e=>e.stopPropagation()} style={{background:T.surface,border:`1px solid ${T.border2}`,borderRadius:20,maxWidth:480,width:"100%",maxHeight:"90vh",overflowY:"auto",padding:"22px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>
         <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:4}}>
           <div style={{flex:1}}>
-            <H size={22}>🗳️ Vote the round</H>
-            <Sub>Show the room, let everyone shout their pick, then tap the winner.</Sub>
+            <H size={22}>🗳️ Pick the round</H>
+            <Sub>Vote it out loud and tap the winner — or let the wheel decide.</Sub>
           </div>
           <button onClick={onClose} style={{background:T.surface2,border:"none",borderRadius:10,width:32,height:32,cursor:"pointer",color:T.textDim,fontSize:16,fontFamily:"inherit"}}>✕</button>
         </div>
-        <div className="bp-grid" style={{marginTop:14}}>
-          {opts.map(o=>(
-            <div key={o.id} onClick={()=>{Sound.tap();setPicked(o.id);}} style={{cursor:"pointer",padding:"15px 14px",borderRadius:15,border:`2px solid ${picked===o.id?o.color:T.border}`,background:picked===o.id?o.color+"18":T.surface2,transition:"border-color .12s,background .12s"}}>
+        <Btn color={T.purple} full onClick={spin} disabled={spinning} style={{marginTop:14}}>{spinning?"🎡 Spinning…":"🎡 Spin the Wheel"}</Btn>
+        <div className="bp-grid" style={{marginTop:12}}>
+          {opts.map(o=>{const on=picked===o.id;return(
+            <div key={o.id} onClick={()=>{if(spinning)return;Sound.tap();setPicked(o.id);}} style={{cursor:spinning?"default":"pointer",padding:"15px 14px",borderRadius:15,border:`2px solid ${on?o.color:T.border}`,background:on?o.color+"22":T.surface2,transform:on?"scale(1.03)":"scale(1)",boxShadow:on?`0 0 22px -4px ${o.color}aa`:"none",transition:"all .1s"}}>
               <div style={{fontSize:30,marginBottom:6}}>{o.emoji}</div>
-              <div style={{fontWeight:800,fontSize:15,color:picked===o.id?o.color:T.text}}>{o.label}</div>
+              <div style={{fontWeight:800,fontSize:15,color:on?o.color:T.text}}>{o.label}</div>
               <div style={{fontSize:12,color:T.textDim,marginTop:3,lineHeight:1.45}}>{o.desc}</div>
-              {picked===o.id&&<div style={{marginTop:8,fontSize:11,fontWeight:800,color:o.color}}>✓ Winner</div>}
+              {on&&!spinning&&<div style={{marginTop:8,fontSize:11,fontWeight:800,color:o.color}}>✓ Winner</div>}
             </div>
-          ))}
+          );})}
         </div>
-        <Btn color={T.gold} full disabled={!picked} onClick={()=>{Sound.vote();onPick(picked);}} style={{marginTop:16,fontSize:15}}>
-          {picked?`Deal ${VOTE_OPTIONS[picked].label} →`:"Pick the winning option"}
+        <Btn color={T.gold} full disabled={!picked||spinning} onClick={()=>{Sound.vote();onPick(picked);}} style={{marginTop:16,fontSize:15}}>
+          {picked&&!spinning?`Deal ${VOTE_OPTIONS[picked].label} →`:"Pick the winning option"}
         </Btn>
         <div style={{fontSize:11,color:T.textFaint,textAlign:"center",marginTop:10}}>The vote happens out loud — this just builds the round around what wins.</div>
       </div>
@@ -1130,7 +1209,7 @@ function DragChip({p,size=20,onPickUp,onTap,dim,big}){
     <button
       onPointerDown={down} onPointerMove={move} onPointerUp={up}
       style={{display:"inline-flex",alignItems:"center",gap:6,padding:big?"4px 12px 4px 5px":"3px 10px 3px 4px",borderRadius:999,cursor:"grab",fontFamily:"inherit",border:`2px solid ${dim?"transparent":p.color+"66"}`,background:p.color+"22",color:p.color,fontWeight:800,fontSize:big?13:12,touchAction:"none",userSelect:"none"}}>
-      <Avatar name={p.name} color={p.color} size={size}/>{p.name}
+      <Avatar name={p.name} color={p.color} emoji={p.emoji} size={size}/>{p.name}
     </button>
   );
 }
@@ -1246,7 +1325,7 @@ function RoundEditor({session,round,onSave,onClose,onRules}){
       {/* drag ghost */}
       {drag&&dragP&&(
         <div style={{position:"fixed",left:drag.x,top:drag.y,transform:"translate(-50%,-130%) rotate(-4deg)",pointerEvents:"none",zIndex:2000,display:"inline-flex",alignItems:"center",gap:6,padding:"5px 13px 5px 6px",borderRadius:999,background:dragP.color,color:T.ink,fontWeight:800,fontSize:13,boxShadow:T.shadowLg}}>
-          <Avatar name={dragP.name} color={"#000"} size={20}/>{dragP.name}
+          <Avatar name={dragP.name} color={"#000"} emoji={dragP.emoji} size={20}/>{dragP.name}
         </div>
       )}
       <div onClick={e=>e.stopPropagation()} style={{background:T.surface,border:`1.5px solid ${T.border2}`,borderRadius:22,maxWidth:720,width:"100%",minHeight:"min(640px,86vh)",padding:"20px",boxShadow:T.shadowLg,marginBottom:20}}>
@@ -1356,20 +1435,20 @@ function MatchCard({match,session,onRecord,onRules}){
           {[["A",grpA,T.red],["B",grpB,T.blue]].map(([k,arr,c])=>(
             <div key={k} style={{display:"contents"}}>
               <div style={{display:"flex",alignItems:"center"}}><span style={{fontSize:11,fontWeight:800,color:c}}>Team {k}</span></div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>{arr.map(p=>p&&<span key={p.id} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,fontWeight:600,padding:"2px 9px",borderRadius:999,background:p.color+"1c",color:p.color}}><Avatar name={p.name} color={p.color} size={16}/>{p.name}</span>)}</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>{arr.map(p=>p&&<span key={p.id} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,fontWeight:600,padding:"2px 9px",borderRadius:999,background:p.color+"1c",color:p.color}}><Avatar name={p.name} color={p.color} emoji={p.emoji} size={16}/>{p.name}</span>)}</div>
             </div>
           ))}
         </div>
       )}
       {is1vAll&&(
         <div style={{display:"grid",gap:8,marginBottom:11}}>
-          <div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:11,fontWeight:800,color:T.orange,minWidth:46}}>👑 The One</span>{solo.map(p=>p&&<span key={p.id} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,fontWeight:700,padding:"2px 9px",borderRadius:999,background:p.color+"1c",color:p.color}}><Avatar name={p.name} color={p.color} size={16}/>{p.name}</span>)}</div>
-          <div style={{display:"flex",alignItems:"flex-start",gap:8}}><span style={{fontSize:11,fontWeight:800,color:T.textDim,minWidth:46,paddingTop:3}}>The Rest</span><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{group.map(p=>p&&<span key={p.id} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,fontWeight:600,padding:"2px 9px",borderRadius:999,background:p.color+"1c",color:p.color}}><Avatar name={p.name} color={p.color} size={16}/>{p.name}</span>)}</div></div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:11,fontWeight:800,color:T.orange,minWidth:46}}>👑 The One</span>{solo.map(p=>p&&<span key={p.id} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,fontWeight:700,padding:"2px 9px",borderRadius:999,background:p.color+"1c",color:p.color}}><Avatar name={p.name} color={p.color} emoji={p.emoji} size={16}/>{p.name}</span>)}</div>
+          <div style={{display:"flex",alignItems:"flex-start",gap:8}}><span style={{fontSize:11,fontWeight:800,color:T.textDim,minWidth:46,paddingTop:3}}>The Rest</span><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{group.map(p=>p&&<span key={p.id} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,fontWeight:600,padding:"2px 9px",borderRadius:999,background:p.color+"1c",color:p.color}}><Avatar name={p.name} color={p.color} emoji={p.emoji} size={16}/>{p.name}</span>)}</div></div>
         </div>
       )}
       {isFFA&&(
         <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:11}}>
-          {match.playerIds.map(pl).map(p=>p&&<span key={p.id} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,fontWeight:600,padding:"2px 9px",borderRadius:999,background:p.color+"1c",color:p.color}}><Avatar name={p.name} color={p.color} size={16}/>{p.name}</span>)}
+          {match.playerIds.map(pl).map(p=>p&&<span key={p.id} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,fontWeight:600,padding:"2px 9px",borderRadius:999,background:p.color+"1c",color:p.color}}><Avatar name={p.name} color={p.color} emoji={p.emoji} size={16}/>{p.name}</span>)}
         </div>
       )}
 
@@ -1418,7 +1497,7 @@ function Recorder({match,session,onSave,onCancel}){
             <div style={{fontSize:12,color:T.textDim,fontWeight:700}}>Tap to assign places:</div>
             {match.playerIds.map(pl).map(p=>p&&(
               <div key={p.id} style={{display:"flex",alignItems:"center",gap:8}}>
-                <Avatar name={p.name} color={p.color} size={28}/>
+                <Avatar name={p.name} color={p.color} emoji={p.emoji} size={28}/>
                 <span style={{flex:1,fontWeight:600,fontSize:13,color:T.text}}>{p.name}</span>
                 <div style={{display:"flex",gap:5}}>{places.map(([place,label])=>{const on=(result[place]||[]).includes(p.id);return <button key={place} onClick={()=>toggleFFA(p.id,place)} style={{padding:"5px 9px",borderRadius:8,fontSize:12,fontWeight:800,cursor:"pointer",border:"none",fontFamily:"inherit",background:on?p.color:T.surface2,color:on?"#15131F":T.textDim}}>{label.split(" ")[0]}</button>;})}</div>
               </div>
@@ -1652,7 +1731,7 @@ function StandingsReveal({session,isTeam,roundN,atTarget,onNext,onVote,onFinish}
             <div key={e.id} style={{background:T.surface,border:`1.5px solid ${i===0?e.color:T.border}`,borderRadius:15,padding:"13px 15px",animation:"bpCardIn .5s both",animationDelay:`${base}s`}}>
               <div style={{display:"flex",alignItems:"center",gap:11}}>
                 <span style={{fontSize:22,width:30,textAlign:"center"}}>{medals[i]||i+1}</span>
-                {!isTeam&&<Avatar name={e.name} color={e.color} size={36} ring={i===0}/>}
+                {!isTeam&&<Avatar name={e.name} color={e.color} emoji={e.emoji} size={36} ring={i===0}/>}
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{display:"flex",alignItems:"center",gap:7}}>
                     <span style={{fontWeight:800,fontSize:15,color:isTeam?e.color:T.text}}>{e.name}</span>
@@ -1781,7 +1860,7 @@ function Standings({session,scores,isTeam}){
           <Card key={e.id} active={i===0} accent={c} style={{padding:"12px 14px",borderColor:i===0?c:T.border}}>
             <div style={{display:"flex",alignItems:"center",gap:11}}>
               <span style={{fontSize:21,width:28,textAlign:"center"}}>{medals[i]||i+1}</span>
-              {!isTeam&&<Avatar name={e.name} color={c} size={34} ring={i===0}/>}
+              {!isTeam&&<Avatar name={e.name} color={c} emoji={e.emoji} size={34} ring={i===0}/>}
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontWeight:800,fontSize:14,color:isTeam?c:T.text,marginBottom:5}}>{e.name}</div>
                 <div style={{height:6,background:T.surface2,borderRadius:999,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.round((pts/max)*100)}%`,background:c,borderRadius:999,transition:"width .5s"}}/></div>
@@ -1848,7 +1927,7 @@ function BonusTab({session,onUpdate}){
         {session.players.map(p=>{const b=rows.find(x=>x.playerId===p.id)||{};const team=isTeam?session.teams.find(t=>t.id===p.teamId):null;return(
           <Card key={p.id} style={{padding:"11px 14px"}}>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <Avatar name={p.name} color={p.color} size={32}/>
+              <Avatar name={p.name} color={p.color} emoji={p.emoji} size={32}/>
               <div style={{flex:1}}><div style={{fontWeight:700,fontSize:13,color:T.text}}>{p.name}</div>{team&&<span style={{fontSize:11,padding:"1px 7px",borderRadius:999,background:team.color+"22",color:team.color,fontWeight:700}}>{team.name}</span>}</div>
               <div style={{display:"flex",gap:6}}>
                 <button onClick={()=>toggle(p.id,"finished")} style={{padding:"6px 11px",borderRadius:9,cursor:"pointer",fontSize:12,fontWeight:800,border:"none",fontFamily:"inherit",background:b.finished?T.green+"26":T.surface2,color:b.finished?T.green:T.textDim}}>{b.finished?"✅ Done":"○"}</button>
@@ -1911,7 +1990,7 @@ function History({past,onBack}){
                 </div>
                 {open===s.id&&(
                   <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${T.border}`,display:"grid",gap:5}}>
-                    {[...ents].sort((a,b)=>(scores[b.id]||0)-(scores[a.id]||0)).map((e,i)=><div key={e.id} style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:15}}>{["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣"][i]||i+1}</span>{!isTeam&&<Avatar name={e.name} color={e.color} size={20}/>}<span style={{flex:1,fontSize:13,fontWeight:isTeam?800:600,color:isTeam?e.color:T.text}}>{e.name}</span><span style={{fontSize:13,color:T.textDim}}>{scores[e.id]||0} pts</span></div>)}
+                    {[...ents].sort((a,b)=>(scores[b.id]||0)-(scores[a.id]||0)).map((e,i)=><div key={e.id} style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:15}}>{["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣"][i]||i+1}</span>{!isTeam&&<Avatar name={e.name} color={e.color} emoji={e.emoji} size={20}/>}<span style={{flex:1,fontSize:13,fontWeight:isTeam?800:600,color:isTeam?e.color:T.text}}>{e.name}</span><span style={{fontSize:13,color:T.textDim}}>{scores[e.id]||0} pts</span></div>)}
                   </div>
                 )}
               </Card>
@@ -1930,7 +2009,7 @@ function Leaderboard({past,onBack}){
   past.forEach(s=>{
     const isTeam=s.mode==="team";const scores=isTeam?null:calcMPScores(s);
     s.players.forEach(p=>{
-      if(!pStats[p.name])pStats[p.name]={name:p.name,color:p.color,parties:0,pts:0,wins:0,bonus:0,gameWins:0,played:0};
+      if(!pStats[p.name])pStats[p.name]={name:p.name,color:p.color,emoji:p.emoji,parties:0,pts:0,wins:0,bonus:0,gameWins:0,played:0};
       const st=pStats[p.name];st.parties++;
       if(!isTeam){st.pts+=scores[p.id]||0;const sorted=[...s.players].sort((a,b)=>(scores[b.id]||0)-(scores[a.id]||0));if(sorted[0]?.id===p.id)st.wins++;}
       s.rounds?.forEach(rd=>rd.matches.forEach(m=>{if(m.result&&m.playerIds.includes(p.id)){st.played++;const mp=matchPoints(m);const mx=Math.max(...Object.values(mp));if(mp[p.id]===mx&&mp[p.id]>0)st.gameWins++;}}));
@@ -1953,7 +2032,7 @@ function Leaderboard({past,onBack}){
             <Card key={p.name} active={i===0} accent={p.color} style={{padding:"12px 14px",borderColor:i===0?p.color:T.border}}>
               <div style={{display:"flex",alignItems:"center",gap:11}}>
                 <span style={{fontSize:21,width:28,textAlign:"center"}}>{medals[i]||i+1}</span>
-                <Avatar name={p.name} color={p.color} size={34} ring={i===0}/>
+                <Avatar name={p.name} color={p.color} emoji={p.emoji} size={34} ring={i===0}/>
                 <div style={{flex:1}}><div style={{fontWeight:800,fontSize:14,color:T.text,marginBottom:3}}>{p.name}</div><div style={{display:"flex",gap:11,flexWrap:"wrap"}}><span style={{fontSize:11,color:T.textFaint}}>{p.parties} parties</span><span style={{fontSize:11,color:T.textFaint}}>{p.wins} 🏆</span><span style={{fontSize:11,color:T.textFaint}}>{p.gameWins} game wins</span><span style={{fontSize:11,color:T.textFaint}}>{p.bonus} bonus</span></div></div>
                 <div style={{textAlign:"right"}}><div style={{fontWeight:900,fontSize:25,color:p.color}}>{p.pts}</div><div style={{fontSize:10,color:T.textFaint}}>pts</div></div>
               </div>
@@ -2008,7 +2087,7 @@ function EndScreen({session,onHome}){
               <div style={{display:"flex",flexWrap:"wrap",gap:8,justifyContent:"center"}}>
                 {winners.map((id,i)=>{const p=isTeam?session.teams.find(t=>t.id===(pl(id)?.teamId))||pl(id):pl(id);const who=pl(id);return(
                   <div key={id} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,padding:"14px 18px",borderRadius:16,background:(who?.color||T.gold)+"1e",border:`1.5px solid ${who?.color||T.gold}`,animation:"bpPop .5s both",animationDelay:`${0.5+i*0.12}s`}}>
-                    <Avatar name={who.name} color={who.color} size={44} ring/>
+                    <Avatar name={who.name} color={who.color} emoji={who.emoji} size={44} ring/>
                     <span style={{fontWeight:800,fontSize:15,color:who.color}}>{who.name}</span>
                     <span style={{fontSize:12,fontWeight:800,color:T.green}}>+2 {isTeam?"(to team)":""}</span>
                   </div>
@@ -2036,7 +2115,7 @@ function EndScreen({session,onHome}){
         </div>
         {champ&&(
           <div style={{textAlign:"center",margin:"10px 0 22px",animation:"bpPop .6s .35s both"}}>
-            {!isTeam&&<div style={{display:"flex",justifyContent:"center",marginBottom:8}}><Avatar name={champ.name} color={champ.color} size={80} ring/></div>}
+            {!isTeam&&<div style={{display:"flex",justifyContent:"center",marginBottom:8}}><Avatar name={champ.name} color={champ.color} emoji={champ.emoji} size={80} ring/></div>}
             <div style={{fontSize:32,fontWeight:900,color:champ.color}}>{champ.name}</div>
             <div style={{fontSize:14,color:T.textDim}}><Counter value={finalScores[champ.id]||0} delay={450}/> points · {session.rounds.length} rounds played</div>
           </div>
@@ -2046,7 +2125,7 @@ function EndScreen({session,onHome}){
             <div key={e.id} style={{background:T.surface,border:`1.5px solid ${i===0?e.color:T.border}`,borderRadius:15,padding:"12px 15px",animation:"bpCardIn .5s both",animationDelay:`${base}s`,boxShadow:i===0?`0 0 0 1px ${e.color}55, ${T.shadowLg}`:T.shadow}}>
               <div style={{display:"flex",alignItems:"center",gap:11}}>
                 <span style={{fontSize:22,width:30,textAlign:"center"}}>{medals[i]||i+1}</span>
-                {!isTeam&&<Avatar name={e.name} color={e.color} size={34} ring={i===0}/>}
+                {!isTeam&&<Avatar name={e.name} color={e.color} emoji={e.emoji} size={34} ring={i===0}/>}
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontWeight:800,fontSize:15,color:isTeam?e.color:T.text}}>{e.name}</div>
                   {isTeam&&<div style={{fontSize:11,color:T.textFaint,marginTop:2}}>{session.players.filter(p=>p.teamId===e.id).map(p=>p.name).join(" · ")}</div>}
@@ -2085,12 +2164,16 @@ function Home({state,onNew,onContinue,onHistory,onLeaderboard}){
   return (
     <div>
       {/* HERO */}
-      <div style={{position:"relative",textAlign:"center",padding:"32px 0 30px",overflow:"hidden"}}>
-        <div style={{position:"absolute",top:-20,left:"50%",transform:"translateX(-50%)",width:280,height:280,borderRadius:"50%",background:`radial-gradient(circle, ${T.purple}33, transparent 65%)`,pointerEvents:"none"}}/>
+      <div style={{position:"relative",textAlign:"center",padding:"30px 0 30px",overflow:"hidden"}}>
+        <div style={{position:"absolute",top:-20,left:"50%",transform:"translateX(-50%)",width:300,height:300,borderRadius:"50%",background:`radial-gradient(circle, ${T.purple}3a, transparent 64%)`,pointerEvents:"none",animation:"bpGlow 4s ease-in-out infinite"}}/>
+        {/* floating party tokens framing the logo */}
+        {[["🎲",-2,"6%",30,"4.2s"],["🪙",6,"86%",24,"3.4s"],["⭐",70,"4%",26,"3.8s"],["🏆",64,"88%",28,"4.6s"],["🍺",128,"14%",22,"3.2s"],["👑",120,"80%",24,"5s"]].map(([e,top,left,sz,dur],i)=>(
+          <div key={i} aria-hidden style={{position:"absolute",top,left,fontSize:sz,opacity:0.9,filter:"drop-shadow(0 6px 12px rgba(0,0,0,0.4))",animation:`bpFloat ${dur} ease-in-out infinite`,animationDelay:`${i*0.3}s`,pointerEvents:"none"}}>{e}</div>
+        ))}
         <div style={{position:"relative"}}>
-          <div style={{fontSize:64,marginBottom:2,animation:"bpFloat 3.5s ease-in-out infinite",display:"inline-block",filter:`drop-shadow(0 8px 22px ${T.gold}55)`}}>🍻</div>
-          <h1 className="bp-title" style={{fontSize:52,fontWeight:900,letterSpacing:"-0.055em",margin:"2px 0 0",lineHeight:0.95}}>BEER<br/>PARTY</h1>
-          <p style={{fontSize:14,color:T.textDim,marginTop:10,fontWeight:600}}>Mario-Party-style party games · drinking optional</p>
+          <div style={{fontSize:64,marginBottom:2,animation:"bpFloat 3.5s ease-in-out infinite",display:"inline-block",filter:`drop-shadow(0 8px 22px ${T.gold}66)`}}>🍻</div>
+          <h1 className="bp-title" style={{fontSize:56,fontWeight:800,letterSpacing:"-0.04em",margin:"2px 0 0",lineHeight:0.92}}>BEER<br/>PARTY</h1>
+          <p style={{fontSize:14,color:T.textDim,marginTop:12,fontWeight:600}}>The Mario-Party-style party game · drinking optional</p>
           <div style={{display:"flex",justifyContent:"center",gap:8,marginTop:16,flexWrap:"wrap"}}>
             {[[gameCount,"games",T.gold],[oneVAll,"1-v-all",T.orange],[partiesPlayed,partiesPlayed===1?"party played":"parties played",T.purple]].map(([n,l,c])=>(
               <div key={l} style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"8px 16px",borderRadius:14,background:c+"18",border:`1.5px solid ${c}44`,minWidth:74}}>
@@ -2224,22 +2307,25 @@ function Root(){
   const s=state.current;
 
   return (
-    <div style={{minHeight:"100vh",background:`radial-gradient(1200px 600px at 50% -10%, ${T.bg2}, ${T.bg})`,color:T.text,fontFamily:"'Outfit','Helvetica Neue',sans-serif"}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap');
+    <div style={{minHeight:"100vh",position:"relative",background:`radial-gradient(1300px 720px at 50% -12%, ${T.bg2}, ${T.bg} 72%)`,color:T.text,fontFamily:"'Outfit','Helvetica Neue',sans-serif"}}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Baloo+2:wght@500;600;700;800&display=swap');
         *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
         ::selection{background:${T.purple}55}
-        input,select{border:1.5px solid ${T.border2};border-radius:12px;padding:11px 14px;font-size:14px;background:${T.surface2};color:${T.text};font-family:inherit;outline:none;font-weight:600}
+        h1,h2,h3{font-family:'Baloo 2','Outfit',sans-serif}
+        input,select{border:1.5px solid ${T.border2};border-radius:13px;padding:11px 14px;font-size:14px;background:${T.surface2};color:${T.text};font-family:inherit;outline:none;font-weight:600}
         input::placeholder{color:${T.textFaint}}
         input:focus,select:focus{border-color:${T.purple};box-shadow:0 0 0 3px ${T.purple}33}
         select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,${T.textDim} 50%),linear-gradient(135deg,${T.textDim} 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:32px;cursor:pointer}
         button{font-family:inherit}
         ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:${T.border2};border-radius:99px}
-        .bp-btn{transition:transform .08s ease, box-shadow .08s ease, filter .15s ease}
-        .bp-btn:hover{filter:brightness(1.06)}
+        /* glossy candy buttons with a sheen sweep + chunky press */
+        .bp-btn{position:relative;overflow:hidden;transition:transform .08s ease, box-shadow .08s ease, filter .15s ease}
+        .bp-btn::after{content:"";position:absolute;inset:0 0 50% 0;background:linear-gradient(180deg,rgba(255,255,255,0.32),transparent);pointer-events:none;border-radius:inherit}
+        .bp-btn:hover{filter:brightness(1.07) saturate(1.05)}
         .bp-btn:active{transform:translateY(4px);box-shadow:none !important}
         .bp-tap{transition:transform .1s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease}
-        .bp-tap:active{transform:scale(0.97)}
-        .bp-card{transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease}
+        .bp-tap:active{transform:scale(0.96)}
+        .bp-card{position:relative;transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease}
         .bp-card.bp-tap:hover{transform:translateY(-3px);box-shadow:${T.shadowLg}}
         .bp-dragging{opacity:0.35!important}
         .bp-drop{outline:2px dashed ${T.purple};outline-offset:2px;background:${T.purple}14!important}
@@ -2249,12 +2335,19 @@ function Root(){
         @keyframes bpCardIn{from{transform:translateY(26px);opacity:0}to{transform:translateY(0);opacity:1}}
         @keyframes bpSpinLand{0%{transform:rotate(-200deg) scale(0.3);opacity:0}70%{transform:rotate(18deg) scale(1.25)}100%{transform:rotate(0deg) scale(1);opacity:1}}
         @keyframes bpVs{0%,100%{transform:scale(1)}50%{transform:scale(1.22)}}
-        @keyframes bpGlow{0%,100%{box-shadow:0 0 0 0 rgba(255,203,69,0)}50%{box-shadow:0 0 24px 2px rgba(255,203,69,0.4)}}
-        @keyframes bpFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+        @keyframes bpGlow{0%,100%{box-shadow:0 0 0 0 rgba(255,201,60,0)}50%{box-shadow:0 0 26px 3px rgba(255,201,60,0.45)}}
+        @keyframes bpFloat{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-9px) rotate(2deg)}}
         @keyframes bpShimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
-        .bp-title{background:linear-gradient(100deg,${T.red},${T.gold} 35%,${T.pink} 60%,${T.purple});background-size:200% auto;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:bpShimmer 5s linear infinite}
+        @keyframes bpOrbA{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(8vw,5vh) scale(1.12)}}
+        @keyframes bpOrbB{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-7vw,7vh) scale(1.16)}}
+        @keyframes bpOrbC{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(5vw,-6vh) scale(1.1)}}
+        @keyframes bpRise{0%{transform:translateY(0) translateX(0) rotate(0deg);opacity:0}8%{opacity:0.18}90%{opacity:0.16}100%{transform:translateY(-112vh) translateX(var(--drift,0px)) rotate(40deg);opacity:0}}
+        @keyframes bpTokenSpin{from{transform:rotateY(0deg)}to{transform:rotateY(360deg)}}
+        @keyframes bpWheelSpin{from{transform:rotate(0)}to{transform:rotate(var(--turn,1440deg))}}
+        @media(prefers-reduced-motion: reduce){.bp-title{animation:none}}
+        .bp-title{font-family:'Baloo 2','Outfit',sans-serif;background:linear-gradient(100deg,${T.red},${T.gold} 32%,${T.pink} 58%,${T.purple});background-size:200% auto;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:bpShimmer 5s linear infinite;filter:drop-shadow(0 3px 0 rgba(0,0,0,0.25))}
         /* responsive */
-        .bp-shell{max-width:560px;margin:0 auto;padding:18px 16px 110px;min-height:100vh;position:relative}
+        .bp-shell{max-width:560px;margin:0 auto;padding:18px 16px 110px;min-height:100vh;position:relative;z-index:1}
         .bp-grid{display:grid;gap:11px}
         .bp-center{max-width:560px;margin:0 auto}
         @media(min-width:720px){
@@ -2264,6 +2357,7 @@ function Root(){
           .bp-center{max-width:840px}
         }
       `}</style>
+      <PartyBackground/>
       <button onClick={()=>{Sound.tap();setShowAudio(true);}} className="bp-tap" title="Sound settings" style={{position:"fixed",top:14,right:14,zIndex:60,width:42,height:42,borderRadius:13,border:`1.5px solid ${T.border2}`,background:T.surface+"e8",backdropFilter:"blur(10px)",WebkitBackdropFilter:"blur(10px)",cursor:"pointer",fontSize:18,boxShadow:T.shadow}}>{settings.sfx||settings.music?"🔊":"🔈"}</button>
       <div className="bp-shell">
         {view==="home"&&<Home state={state} onNew={()=>setView("mode")} onContinue={()=>setView("session")} onHistory={()=>setView("history")} onLeaderboard={()=>setView("leaderboard")}/>}

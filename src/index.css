@@ -1,0 +1,12 @@
+/* Base reset — the app itself injects its full themed stylesheet at runtime. */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+body {
+  background: #0c0a1a;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
