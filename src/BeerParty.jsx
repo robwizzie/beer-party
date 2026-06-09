@@ -488,6 +488,13 @@ function applyIntent(s,intent){
   if(intent.type==="toggleQuest"){
     return {...s,bonus:(s.bonus||[]).map(b=>(b.bonusId===intent.bonusId&&b.playerId===intent.playerId)?{...b,finished:!b.finished}:b)};
   }
+  if(intent.type==="reportResult"){
+    // a phone proposes a result for its current match — staged as pendingResult
+    // for the board (host) to confirm. Only the current round is editable.
+    const rounds=s.rounds||[];if(!rounds.length)return s;
+    const last=rounds.length-1;
+    return {...s,rounds:rounds.map((rd,i)=>i!==last?rd:{...rd,matches:rd.matches.map(m=>(m.id!==intent.matchId||m.result)?m:{...m,pendingResult:{result:intent.result,by:intent.by}})})};
+  }
   return s;
 }
 
@@ -866,11 +873,43 @@ export default function App(){
 }
 
 // ─── PHONE COMPANION (joins a board's room over LAN; one player per phone) ─────
+// read-only leaderboard for phones (board stays the source of truth)
+function PhoneStandings({session}){
+  const isTeam=session.mode==="team";
+  const scores=isTeam?calcTeamScores(session):calcMPScores(session);
+  const ents=isTeam?(session.teams||[]):session.players;
+  const sorted=[...ents].sort((a,b)=>(scores[b.id]||0)-(scores[a.id]||0));
+  const max=Math.max(...Object.values(scores),1);
+  const medals=["🥇","🥈","🥉"];
+  const anyScore=Object.values(scores).some(v=>v>0);
+  return (
+    <div>
+      {!anyScore&&<Card style={{marginBottom:10,textAlign:"center",padding:"14px"}}><Sub>No points yet — play a round! Secret missions & bonus stars stay hidden until the finish.</Sub></Card>}
+      <div style={{display:"grid",gap:8}}>
+        {sorted.map((e,i)=>{const pts=scores[e.id]||0;const c=e.color;return(
+          <Card key={e.id} active={i===0} accent={c} style={{padding:"11px 13px",borderColor:i===0?c:T.border}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:18,width:24,textAlign:"center"}}>{medals[i]||i+1}</span>
+              {!isTeam&&<Avatar name={e.name} color={c} emoji={e.emoji} size={28} ring={i===0}/>}
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:800,fontSize:14,color:isTeam?c:T.text}}>{e.name}</div>
+                <div style={{height:6,background:T.surface2,borderRadius:99,overflow:"hidden",marginTop:5}}><div style={{height:"100%",width:`${Math.round(pts/max*100)}%`,background:grad(c),borderRadius:99}}/></div>
+              </div>
+              <span style={{fontWeight:900,fontSize:22,color:c,minWidth:30,textAlign:"right"}}>{pts}</span>
+            </div>
+          </Card>
+        );})}
+      </div>
+    </div>
+  );
+}
 function PhoneApp({code}){
   const [session,setSession]=useState(null);
   const [status,setStatus]=useState("connecting"); // connecting|open|offline|noroom|hostgone
   const [pid,setPid]=useState(()=>{try{return localStorage.getItem("bp_pid_"+code)||null;}catch{return null;}});
   const [rules,setRules]=useState(null);
+  const [tab,setTab]=useState("card");          // card | standings
+  const [reporting,setReporting]=useState(null); // match being reported
   const clientRef=useRef(null);
   useEffect(()=>{
     const c=makeClient({role:"phone",code,onStatus:(st)=>setStatus(s=>s==="noroom"?s:st),onMessage:(m)=>{
@@ -887,6 +926,7 @@ function PhoneApp({code}){
   const pickMe=(id)=>{setPid(id);try{localStorage.setItem("bp_pid_"+code,id);}catch{}Sound.tap();};
   const claimMission=(myTask)=>{Sound[myTask.status==="done"?"tap":"success"]();send({type:"claimMission",playerId:pid});};
   const toggleQuest=(bonusId)=>{Sound.tap();send({type:"toggleQuest",playerId:pid,bonusId});};
+  const reportResult=(match,result)=>{Sound.success();send({type:"reportResult",matchId:match.id,result,by:pid});setReporting(null);};
 
   const dot=status==="open"?T.green:status==="offline"?T.orange:T.red;
   const Wrap=({children})=>(
@@ -920,15 +960,35 @@ function PhoneApp({code}){
     </Wrap>
   );
 
+  const round=(session.rounds||[])[(session.rounds||[]).length-1];
+  const myMatch=round&&round.matches.find(m=>m.playerIds.includes(pid));
   return (
     <Wrap>
-      <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:14}}>
+      <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:12}}>
         <Avatar name={player.name} color={player.color} emoji={player.emoji} size={44} ring/>
         <div style={{flex:1}}><div style={{fontWeight:900,fontSize:18,color:T.text}}>{player.name}</div><div style={{fontSize:12,color:T.textDim}}>Your card</div></div>
         <button onClick={()=>setPid(null)} className="bp-tap" style={{background:T.surface2,border:`1.5px solid ${T.border2}`,borderRadius:11,padding:"7px 11px",cursor:"pointer",color:T.textDim,fontSize:12,fontWeight:700,fontFamily:"inherit"}}>↩ Not you?</button>
       </div>
       {status==="hostgone"&&<Card style={{marginBottom:12,borderColor:T.orange+"55",background:T.orange+"12"}}><div style={{fontSize:13,color:T.orange,fontWeight:700}}>⚠ Lost the board — waiting for it to come back…</div></Card>}
-      <PlayerCardBody key={pid} session={session} pid={pid} onClaim={claimMission} onToggleQuest={toggleQuest} onRules={(g,f)=>setRules({game:g,formatId:f})}/>
+      <div style={{marginBottom:14}}><Tabs tabs={[["card","🎭 My Card"],["standings","📊 Standings"]]} active={tab} onChange={setTab}/></div>
+      {tab==="card"?(
+        <div>
+          <PlayerCardBody key={pid} session={session} pid={pid} onClaim={claimMission} onToggleQuest={toggleQuest} onRules={(g,f)=>setRules({game:g,formatId:f})}/>
+          {myMatch&&!myMatch.result&&(
+            <div style={{marginTop:14}}>
+              {myMatch.pendingResult?(
+                <div style={{padding:"11px 13px",borderRadius:12,background:T.blue+"12",border:`1.5px solid ${T.blue}44`,fontSize:12.5,color:T.blue,fontWeight:700,textAlign:"center"}}>📲 Result reported — waiting for the host to confirm.</div>
+              ):(
+                <Btn full color={T.blue} variant="soft" onClick={()=>{Sound.tap();setReporting(myMatch);}}>📲 Report this game's result</Btn>
+              )}
+              <div style={{fontSize:11,color:T.textFaint,textAlign:"center",marginTop:7}}>Saves the host a trip — they just confirm it on the board.</div>
+            </div>
+          )}
+        </div>
+      ):(
+        <PhoneStandings session={session}/>
+      )}
+      {reporting&&<Recorder match={reporting} session={session} onCancel={()=>setReporting(null)} onSave={(r)=>reportResult(reporting,r)}/>}
       {rules&&<RulesModal game={rules.game} formatId={rules.formatId} onClose={()=>setRules(null)}/>}
     </Wrap>
   );
@@ -1605,7 +1665,7 @@ function RoundEditor({session,round,onSave,onClose,onRules}){
 
 
 // ─── MATCH CARD ───────────────────────────────────────────────────────────────
-function MatchCard({match,session,onRecord,onRules}){
+function MatchCard({match,session,onRecord,onRules,onConfirmPending}){
   const game=GAMES[match.gameId];const fmt=FORMATS[match.formatId];
   const pl=id=>session.players.find(p=>p.id===id);
   const done=!!match.result;
@@ -1657,7 +1717,17 @@ function MatchCard({match,session,onRecord,onRules}){
       )}
 
       <div style={{fontSize:11,color:T.textFaint,marginBottom:done?0:11}}>{fmt.pts}</div>
-      {!done&&<Btn color={fmt.color} variant="soft" full onClick={()=>onRecord(match)}>Record result</Btn>}
+      {!done&&match.pendingResult&&(
+        <div style={{marginBottom:10,padding:"10px 12px",borderRadius:12,background:T.blue+"12",border:`1.5px solid ${T.blue}55`}}>
+          <div style={{fontSize:11,fontWeight:800,color:T.blue,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}}>📲 Reported by {pl(match.pendingResult.by)?.name||"a phone"}</div>
+          <ResultSummary match={{...match,result:match.pendingResult.result}} session={session}/>
+          <div style={{display:"flex",gap:7,marginTop:10}}>
+            <Btn color={T.green} onClick={()=>onConfirmPending&&onConfirmPending(match.id)} style={{flex:2,padding:"9px"}}>✓ Confirm</Btn>
+            <Btn variant="soft" color={fmt.color} onClick={()=>onRecord(match)} style={{flex:1,padding:"9px"}}>Adjust</Btn>
+          </div>
+        </div>
+      )}
+      {!done&&!match.pendingResult&&<Btn color={fmt.color} variant="soft" full onClick={()=>onRecord(match)}>Record result</Btn>}
       {done&&<ResultSummary match={match} session={session}/>}
     </Card>
   );
@@ -1933,9 +2003,15 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
     setDice({round,label:`${VOTE_OPTIONS[voteId]?.label||"Round"} — let's go!`});
   };
   const saveResult=(roundIdx,matchId,result)=>{
-    const newRounds=session.rounds.map((rd,i)=>i!==roundIdx?rd:{...rd,matches:rd.matches.map(m=>m.id===matchId?{...m,result}:m)});
+    const newRounds=session.rounds.map((rd,i)=>i!==roundIdx?rd:{...rd,matches:rd.matches.map(m=>m.id===matchId?{...m,result,pendingResult:undefined}:m)});
     onUpdate({...session,rounds:newRounds});
     setRecording(null);
+  };
+  // host confirms a phone-reported result, committing it to the official record
+  const confirmPending=(matchId)=>{
+    Sound.success();
+    const idx=rounds.length-1;
+    onUpdate({...session,rounds:session.rounds.map((rd,i)=>i!==idx?rd:{...rd,matches:rd.matches.map(m=>(m.id!==matchId||!m.pendingResult)?m:{...m,result:m.pendingResult.result,pendingResult:undefined})})});
   };
   const reshuffleRound=(roundIdx)=>{
     Sound.deal();
@@ -2024,7 +2100,7 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
                       </div>
                     </div>
                     <div className="bp-grid">
-                      {currentRound.matches.map(m=><MatchCard key={m.id} match={m} session={session} onRules={showRules} onRecord={(match)=>setRecording({roundIdx:rounds.length-1,match})}/>)}
+                      {currentRound.matches.map(m=><MatchCard key={m.id} match={m} session={session} onRules={showRules} onConfirmPending={confirmPending} onRecord={(match)=>setRecording({roundIdx:rounds.length-1,match})}/>)}
                     </div>
                     {currentRound.benched?.length>0&&(
                       <Card style={{marginTop:10,borderColor:T.gold+"44",background:T.gold+"0c"}}>

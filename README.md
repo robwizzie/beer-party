@@ -37,9 +37,17 @@ npm run host     # builds, then serves the app + a WebSocket room hub on :8080
 - Everyone on the **same wifi** scans the QR (or visits `http://<laptop-ip>:8080`
   and enters the code) to open their **own card** on their phone — their game
   this round, their **secret mission** (reveal-gated), and their side quests.
+- Each phone also has a **📊 Standings** tab (live leaderboard) and can
+  **📲 report its match result** — the host just taps **Confirm** on the board,
+  so one scorekeeper isn't running between every station.
 - Phones send *intents*; the board decides and re-broadcasts state. No cloud, no
   accounts, works offline on the local network. The app still runs fully
   single-device if you never go live.
+
+## Roadmap
+
+- [`docs/IMPOSTER_MODE.md`](docs/IMPOSTER_MODE.md) — design notes for a future
+  Among-Us-style hidden-role / saboteur mode (not built yet).
 
 ## What's inside
 

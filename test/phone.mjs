@@ -89,6 +89,27 @@ try {
   await click(byText(/pulled it off/i));
   const claim = ws.sent.slice(before).find((m) => m.t === "intent" && m.intent?.type === "claimMission");
   checks.push(["claim sent the right intent over the wire", !!claim && claim.intent.playerId === "p1"]);
+
+  // --- Standings tab ---
+  await click(byText(/📊 Standings/i));
+  checks.push(["standings tab lists players", /Ava/.test(root.textContent) && /Ben/.test(root.textContent) && /No points yet/i.test(root.textContent)]);
+  await click(byText(/🎭 My Card/i));
+
+  // --- report this match's result (board will confirm) ---
+  await click(byText(/Report this game/i));
+  // winner control lives inside the Recorder modal (scope to it)
+  const inModal = (re) => {
+    const save = byText(/Save & Award/i); if (!save) return null;
+    let panel = save; while (panel.parentElement && !/Who won|assign places/i.test(panel.textContent || "")) panel = panel.parentElement;
+    return [...panel.querySelectorAll("button,div,span")].filter((el) => re.test((el.textContent || "").trim()))
+      .sort((a, b) => a.getElementsByTagName("*").length - b.getElementsByTagName("*").length)[0];
+  };
+  const b2 = ws.sent.length;
+  const w = inModal(/^✓?\s*Team A$/) || inModal(/🥇/);
+  if (w) await click(w);
+  await click(byText(/Save & Award/i));
+  const report = ws.sent.slice(b2).find((m) => m.t === "intent" && m.intent?.type === "reportResult");
+  checks.push(["report sent reportResult intent for the match", !!report && report.intent.matchId === "m1" && report.intent.by === "p1"]);
 } catch (e) {
   checks.push(["phone flow completed", false]);
   errors.push("FLOW ERROR: " + (e && e.stack ? e.stack : e));
