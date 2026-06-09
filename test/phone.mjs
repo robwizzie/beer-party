@@ -90,6 +90,12 @@ try {
   const claim = ws.sent.slice(before).find((m) => m.t === "intent" && m.intent?.type === "claimMission");
   checks.push(["claim sent the right intent over the wire", !!claim && claim.intent.playerId === "p1"]);
 
+  // regression: a board state push must NOT remount the card (the revealed
+  // mission used to snap back to hidden whenever the host recorded anything)
+  ws.push({ t: "state", state: { ...session, secretTasks: [{ playerId: "p1", taskId: "ice_cube", status: "done" }, session.secretTasks[1]] } });
+  await tick(120);
+  checks.push(["mission stays revealed after a board state push", /Marked done/i.test(root.textContent)]);
+
   // --- Standings tab ---
   await click(byText(/📊 Standings/i));
   checks.push(["standings tab lists players", /Ava/.test(root.textContent) && /Ben/.test(root.textContent) && /No points yet/i.test(root.textContent)]);
@@ -99,7 +105,7 @@ try {
   await click(byText(/Report this game/i));
   // winner control lives inside the Recorder modal (scope to it)
   const inModal = (re) => {
-    const save = byText(/Save & Award/i); if (!save) return null;
+    const save = byText(/Send to board/i); if (!save) return null;
     let panel = save; while (panel.parentElement && !/Who won|assign places/i.test(panel.textContent || "")) panel = panel.parentElement;
     return [...panel.querySelectorAll("button,div,span")].filter((el) => re.test((el.textContent || "").trim()))
       .sort((a, b) => a.getElementsByTagName("*").length - b.getElementsByTagName("*").length)[0];
@@ -107,7 +113,7 @@ try {
   const b2 = ws.sent.length;
   const w = inModal(/^✓?\s*Team A$/) || inModal(/🥇/);
   if (w) await click(w);
-  await click(byText(/Save & Award/i));
+  await click(byText(/Send to board/i));
   const report = ws.sent.slice(b2).find((m) => m.t === "intent" && m.intent?.type === "reportResult");
   checks.push(["report sent reportResult intent for the match", !!report && report.intent.matchId === "m1" && report.intent.by === "p1"]);
 } catch (e) {

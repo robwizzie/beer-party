@@ -847,6 +847,9 @@ const GLOBAL_CSS=`@import url('https://fonts.googleapis.com/css2?family=Outfit:w
         @keyframes bpRise{0%{transform:translateY(0) translateX(0) rotate(0deg);opacity:0}8%{opacity:0.18}90%{opacity:0.16}100%{transform:translateY(-112vh) translateX(var(--drift,0px)) rotate(40deg);opacity:0}}
         @keyframes bpTokenSpin{from{transform:rotateY(0deg)}to{transform:rotateY(360deg)}}
         @keyframes bpWheelSpin{from{transform:rotate(0)}to{transform:rotate(var(--turn,1440deg))}}
+        @keyframes bpStepUp{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+        @keyframes bpPodiumDrop{0%{transform:translateY(-70px) scale(0);opacity:0}62%{transform:translateY(7px) scale(1.1);opacity:1}82%{transform:translateY(-3px) scale(0.97)}100%{transform:translateY(0) scale(1);opacity:1}}
+        @keyframes bpRaysSpin{from{transform:translate(-50%,-50%) rotate(0deg)}to{transform:translate(-50%,-50%) rotate(360deg)}}
         @media(prefers-reduced-motion: reduce){.bp-title{animation:none}}
         .bp-title{font-family:'Baloo 2','Outfit',sans-serif;background:linear-gradient(100deg,${T.red},${T.gold} 32%,${T.pink} 58%,${T.purple});background-size:200% auto;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:bpShimmer 5s linear infinite;filter:drop-shadow(0 3px 0 rgba(0,0,0,0.25))}
         /* responsive */
@@ -934,13 +937,25 @@ function PhoneApp({code}){
   // a reused room code from a past party may leave a pid that no longer exists
   useEffect(()=>{ if(session&&pid&&!session.players.some(p=>p.id===pid)){setPid(null);try{localStorage.removeItem("bp_pid_"+code);}catch{}} },[session,pid,code]);
   const finished=session&&session.status==="finished";
+  // close an open report dialog if its match was resolved or replaced by a new
+  // round on the board — otherwise the report would target a stale match id
+  useEffect(()=>{
+    if(!reporting||!session)return;
+    const rd=(session.rounds||[])[(session.rounds||[]).length-1];
+    const m=rd&&rd.matches.find(x=>x.id===reporting.id);
+    if(!m||m.result)setReporting(null);
+  },[session,reporting]);
   const pickMe=(id)=>{setPid(id);try{localStorage.setItem("bp_pid_"+code,id);}catch{}Sound.tap();};
   const claimMission=(myTask)=>{Sound[myTask.status==="done"?"tap":"success"]();send({type:"claimMission",playerId:pid});};
   const toggleQuest=(bonusId)=>{Sound.tap();send({type:"toggleQuest",playerId:pid,bonusId});};
   const reportResult=(match,result)=>{Sound.success();send({type:"reportResult",matchId:match.id,result,by:pid});setReporting(null);};
 
   const dot=status==="open"?T.green:status==="offline"?T.orange:T.red;
-  const Wrap=({children})=>(
+  // Plain render helper, NOT a component — defining a component inside render
+  // would change its identity every render and make React remount the whole
+  // subtree on every board state push (resetting revealed missions, in-progress
+  // result reports, and restarting animations).
+  const wrap=(children)=>(
     <ShellBg>
       <div style={{maxWidth:480,margin:"0 auto",padding:"16px 14px 40px",position:"relative",zIndex:1}}>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
@@ -954,11 +969,11 @@ function PhoneApp({code}){
     </ShellBg>
   );
 
-  if(status==="noroom") return <Wrap><Card style={{textAlign:"center",padding:"26px 18px"}}><div style={{fontSize:38,marginBottom:8}}>🤔</div><H size={18}>Room {code} isn't live</H><Sub>Ask the host to tap 📺 Go Live on the board, then rescan — or double-check the code.</Sub></Card></Wrap>;
-  if(!session) return <Wrap><Card style={{textAlign:"center",padding:"30px 18px"}}><div style={{fontSize:38,marginBottom:8,animation:"bpFloat 2.5s ease-in-out infinite"}}>📡</div><H size={18}>{status==="offline"?"Reconnecting…":"Connecting…"}</H><Sub>Joining the party on this wifi.</Sub></Card></Wrap>;
+  if(status==="noroom") return wrap(<Card style={{textAlign:"center",padding:"26px 18px"}}><div style={{fontSize:38,marginBottom:8}}>🤔</div><H size={18}>Room {code} isn't live</H><Sub>Ask the host to tap 📺 Go Live on the board — this phone will hop in automatically the moment it opens.</Sub></Card>);
+  if(!session) return wrap(<Card style={{textAlign:"center",padding:"30px 18px"}}><div style={{fontSize:38,marginBottom:8,animation:"bpFloat 2.5s ease-in-out infinite"}}>📡</div><H size={18}>{status==="offline"?"Reconnecting…":"Connecting…"}</H><Sub>Joining the party on this wifi.</Sub></Card>);
 
-  if(!player) return (
-    <Wrap>
+  if(!player) return wrap(
+    <div>
       <H size={20}>Who are you?</H><Sub>Tap your name to grab your card.</Sub>
       <div className="bp-grid" style={{marginTop:14,gridTemplateColumns:"1fr 1fr"}}>
         {session.players.map(p=>(
@@ -968,13 +983,13 @@ function PhoneApp({code}){
           </button>
         ))}
       </div>
-    </Wrap>
+    </div>
   );
 
   const round=(session.rounds||[])[(session.rounds||[]).length-1];
   const myMatch=round&&round.matches.find(m=>m.playerIds.includes(pid));
-  return (
-    <Wrap>
+  return wrap(
+    <div>
       <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:12}}>
         <Avatar name={player.name} color={player.color} emoji={player.emoji} size={44} ring/>
         <div style={{flex:1}}><div style={{fontWeight:900,fontSize:18,color:T.text}}>{player.name}</div><div style={{fontSize:12,color:T.textDim}}>Your card</div></div>
@@ -1000,9 +1015,9 @@ function PhoneApp({code}){
       ):(
         <PhoneStandings session={session}/>
       )}
-      {reporting&&<Recorder match={reporting} session={session} onCancel={()=>setReporting(null)} onSave={(r)=>reportResult(reporting,r)}/>}
+      {reporting&&<Recorder match={reporting} session={session} submitLabel="📲 Send to board" onCancel={()=>setReporting(null)} onSave={(r)=>reportResult(reporting,r)}/>}
       {rules&&<RulesModal game={rules.game} formatId={rules.formatId} onClose={()=>setRules(null)}/>}
-    </Wrap>
+    </div>
   );
 }
 
@@ -1374,10 +1389,11 @@ function RoundReveal({round,session,onDone}){
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(8,6,16,0.94)",zIndex:1100,overflowY:"auto",padding:"26px 16px 28px"}}>
       <div style={{maxWidth:600,margin:"0 auto"}}>
-        <div style={{textAlign:"center",marginBottom:20}}>
-          <div style={{fontSize:12,fontWeight:800,letterSpacing:"0.22em",color:T.textDim,textTransform:"uppercase",animation:"bpFade .4s both"}}>Get ready for</div>
-          <div style={{fontSize:40,fontWeight:900,letterSpacing:"-0.03em",color:T.gold,animation:"bpSlam .55s .1s both"}}>ROUND {round.n}</div>
-          <div style={{fontSize:13,color:T.textDim,marginTop:2,animation:"bpFade .5s .3s both"}}>{round.matches.length} game{round.matches.length===1?"":"s"} at once · nobody sits out</div>
+        <div style={{textAlign:"center",marginBottom:20,position:"relative"}}>
+          <div aria-hidden style={{position:"absolute",left:"50%",top:"50%",width:260,height:260,transform:"translate(-50%,-50%)",background:`conic-gradient(${T.gold}26 0deg,transparent 30deg,${T.gold}14 60deg,transparent 90deg,${T.gold}26 120deg,transparent 150deg,${T.gold}14 180deg,transparent 210deg,${T.gold}26 240deg,transparent 270deg,${T.gold}14 300deg,transparent 330deg)`,borderRadius:"50%",animation:"bpRaysSpin 16s linear infinite",maskImage:"radial-gradient(circle, #000 25%, transparent 68%)",WebkitMaskImage:"radial-gradient(circle, #000 25%, transparent 68%)",pointerEvents:"none"}}/>
+          <div style={{position:"relative",fontSize:12,fontWeight:800,letterSpacing:"0.22em",color:T.textDim,textTransform:"uppercase",animation:"bpFade .4s both"}}>Get ready for</div>
+          <div style={{position:"relative",fontSize:42,fontWeight:800,letterSpacing:"-0.02em",color:T.gold,fontFamily:"'Baloo 2','Outfit',sans-serif",animation:"bpSlam .55s .1s both",filter:`drop-shadow(0 0 22px ${T.gold}55)`}}>ROUND {round.n}</div>
+          <div style={{position:"relative",fontSize:13,color:T.textDim,marginTop:2,animation:"bpFade .5s .3s both"}}>{round.matches.length} game{round.matches.length===1?"":"s"} at once · nobody sits out</div>
         </div>
         <div className="bp-grid">
           {round.matches.map((m,i)=><RevealMatch key={m.id} match={m} pl={pl} idx={i}/>)}
@@ -1757,7 +1773,7 @@ function ResultSummary({match,session}){
 }
 
 // ─── RESULT RECORDER (modal-ish inline) ───────────────────────────────────────
-function Recorder({match,session,onSave,onCancel}){
+function Recorder({match,session,onSave,onCancel,submitLabel}){
   const game=GAMES[match.gameId];const fmt=FORMATS[match.formatId];
   const pl=id=>session.players.find(p=>p.id===id);
   const [result,setResult]=useState({});
@@ -1814,7 +1830,7 @@ function Recorder({match,session,onSave,onCancel}){
         )}
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" onClick={onCancel} style={{flex:1}}>Cancel</Btn>
-          <Btn color={T.gold} disabled={!canSave} onClick={()=>{Sound.success();onSave(result);}} style={{flex:2}}>✓ Save & Award</Btn>
+          <Btn color={T.gold} disabled={!canSave} onClick={()=>{Sound.success();onSave(result);}} style={{flex:2}}>{submitLabel||"✓ Save & Award"}</Btn>
         </div>
       </div>
     </div>
@@ -1987,6 +2003,7 @@ function Session({session,onUpdate,onEnd,onFinish,mode,live,liveStatus,onGoLive,
   const [editing,setEditing]=useState(false);      // show round editor
   const [dice,setDice]=useState(null);            // pending reveal during dice roll
   const [showCard,setShowCard]=useState(false);   // personal "My Card" hub
+  const [burst,setBurst]=useState(null);          // confetti burst on recorded results
   const isTeam=mode==="team";
   const scores=isTeam?calcTeamScores(session):calcMPScores(session);
   const rounds=session.rounds||[];
@@ -2011,16 +2028,22 @@ function Session({session,onUpdate,onEnd,onFinish,mode,live,liveStatus,onGoLive,
     setVoting(false);
     setDice({round,label:`${VOTE_OPTIONS[voteId]?.label||"Round"} — let's go!`});
   };
+  // brief confetti burst whenever a result lands — every game ends on a win moment
+  const burstTimer=useRef(null);
+  const celebrate=()=>{setBurst(Date.now());clearTimeout(burstTimer.current);burstTimer.current=setTimeout(()=>setBurst(null),2600);};
+  useEffect(()=>()=>clearTimeout(burstTimer.current),[]);
   const saveResult=(roundIdx,matchId,result)=>{
     const newRounds=session.rounds.map((rd,i)=>i!==roundIdx?rd:{...rd,matches:rd.matches.map(m=>m.id===matchId?{...m,result,pendingResult:undefined}:m)});
     onUpdate({...session,rounds:newRounds});
     setRecording(null);
+    celebrate();
   };
   // host confirms a phone-reported result, committing it to the official record
   const confirmPending=(matchId)=>{
     Sound.success();
     const idx=rounds.length-1;
     onUpdate({...session,rounds:session.rounds.map((rd,i)=>i!==idx?rd:{...rd,matches:rd.matches.map(m=>(m.id!==matchId||!m.pendingResult)?m:{...m,result:m.pendingResult.result,pendingResult:undefined})})});
+    celebrate();
   };
   const reshuffleRound=(roundIdx)=>{
     Sound.deal();
@@ -2137,6 +2160,7 @@ function Session({session,onUpdate,onEnd,onFinish,mode,live,liveStatus,onGoLive,
       {voting&&<VoteModal session={session} onPick={dealVotedRound} onClose={()=>setVoting(false)}/>}
       {editing&&currentRound&&<RoundEditor session={session} round={currentRound} onSave={applyEditedRound} onClose={()=>setEditing(false)} onRules={showRules}/>}
       {showCard&&<MyCardModal session={session} onUpdate={onUpdate} onClose={()=>setShowCard(false)} onRules={showRules}/>}
+      {burst&&<Confetti key={burst} count={54} duration={2200}/>}
     </div>
   );
 }
@@ -2176,15 +2200,30 @@ function StandingsReveal({session,isTeam,roundN,atTarget,onNext,onVote,onFinish}
   const thisRound=(session.rounds||[]).find(r=>r.n===roundN);
   const delta={};(ents).forEach(e=>delta[e.id]=0);
   thisRound?.matches.forEach(m=>{if(m.result){const mp=matchPoints(m);Object.entries(mp).forEach(([i,v])=>{if(isTeam){const pl=session.players.find(p=>p.id===i);if(pl)delta[pl.teamId]=(delta[pl.teamId]||0)+v;}else delta[i]=(delta[i]||0)+v;});}});
+  // rank movement vs. before this round (the Mario-Party "positions change!" drama)
+  const prevPts={};ents.forEach(e=>prevPts[e.id]=(scores[e.id]||0)-(delta[e.id]||0));
+  const prevSorted=[...ents].sort((a,b)=>prevPts[b.id]-prevPts[a.id]);
+  const prevRank={};prevSorted.forEach((e,i)=>prevRank[e.id]=i);
+  const move=(e,i)=>roundN>1?(prevRank[e.id]-i):0; // + = climbed, − = dropped
+  // leader callout: announce a NEW sole leader (or the first one to take the lead)
+  const leader=sorted[0]&&(scores[sorted[0].id]||0)>0&&(scores[sorted[0].id]||0)>(scores[sorted[1]?.id]||0)?sorted[0]:null;
+  const prevLeader=prevSorted[0]&&prevPts[prevSorted[0].id]>0&&prevPts[prevSorted[0].id]>(prevPts[prevSorted[1]?.id]||0)?prevSorted[0]:null;
+  const newLeader=leader&&(!prevLeader||prevLeader.id!==leader.id)?leader:null;
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(8,6,16,0.95)",zIndex:1100,overflowY:"auto",padding:"30px 16px 28px"}}>
       <div style={{maxWidth:600,margin:"0 auto"}}>
-        <div style={{textAlign:"center",marginBottom:22}}>
+        <div style={{textAlign:"center",marginBottom:newLeader?10:22}}>
           <div style={{fontSize:12,fontWeight:800,letterSpacing:"0.22em",color:T.textDim,textTransform:"uppercase",animation:"bpFade .4s both"}}>Round {roundN} complete</div>
-          <div style={{fontSize:34,fontWeight:900,color:T.gold,animation:"bpSlam .55s .1s both"}}>STANDINGS</div>
+          <div style={{fontSize:34,fontWeight:800,color:T.gold,fontFamily:"'Baloo 2','Outfit',sans-serif",animation:"bpSlam .55s .1s both",filter:`drop-shadow(0 0 18px ${T.gold}44)`}}>STANDINGS</div>
         </div>
+        {newLeader&&(
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,margin:"0 0 18px",padding:"9px 16px",borderRadius:999,background:`linear-gradient(90deg, transparent, ${newLeader.color}26, transparent)`,animation:"bpSlam .5s .5s both"}}>
+            <span style={{fontSize:18}}>👑</span>
+            <span style={{fontSize:15,fontWeight:900,color:newLeader.color,fontFamily:"'Baloo 2','Outfit',sans-serif"}}>{newLeader.name} takes the lead!</span>
+          </div>
+        )}
         <div style={{display:"grid",gap:9}}>
-          {sorted.map((e,i)=>{const pts=scores[e.id]||0;const d=delta[e.id]||0;const base=0.2+i*0.13;return(
+          {sorted.map((e,i)=>{const pts=scores[e.id]||0;const d=delta[e.id]||0;const mv=move(e,i);const base=0.2+i*0.13;return(
             <div key={e.id} style={{background:T.surface,border:`1.5px solid ${i===0?e.color:T.border}`,borderRadius:15,padding:"13px 15px",animation:"bpCardIn .5s both",animationDelay:`${base}s`}}>
               <div style={{display:"flex",alignItems:"center",gap:11}}>
                 <span style={{fontSize:22,width:30,textAlign:"center"}}>{medals[i]||i+1}</span>
@@ -2193,6 +2232,7 @@ function StandingsReveal({session,isTeam,roundN,atTarget,onNext,onVote,onFinish}
                   <div style={{display:"flex",alignItems:"center",gap:7}}>
                     <span style={{fontWeight:800,fontSize:15,color:isTeam?e.color:T.text}}>{e.name}</span>
                     {d>0&&<span style={{fontSize:12,fontWeight:800,color:T.green,animation:"bpPop .4s both",animationDelay:`${base+0.25}s`}}>+{d}</span>}
+                    {mv!==0&&<span style={{fontSize:11,fontWeight:900,color:mv>0?T.green:T.red,animation:"bpPop .4s both",animationDelay:`${base+0.35}s`}}>{mv>0?`▲${mv}`:`▼${-mv}`}</span>}
                   </div>
                   <div style={{height:7,background:T.surface2,borderRadius:99,overflow:"hidden",marginTop:6}}><div style={{height:"100%",width:`${Math.round((pts/max)*100)}%`,background:grad(e.color),borderRadius:99,transition:"width .9s cubic-bezier(.2,.8,.2,1)",transitionDelay:`${base+0.1}s`}}/></div>
                 </div>
@@ -2513,6 +2553,43 @@ function Leaderboard({past,onBack}){
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
+// ─── PODIUM (award-ceremony steps: 3rd lands, then 2nd, then the champ) ────────
+function PodiumSteps({sorted,scores}){
+  // render order is 2nd · 1st · 3rd so first place towers in the middle
+  const defs=[
+    {idx:1,h:86,c:"#C9D4EA",delay:1.05},
+    {idx:0,h:126,c:T.gold,delay:1.75},
+    {idx:2,h:64,c:"#D29B6B",delay:0.45},
+  ];
+  return (
+    <div style={{position:"relative",margin:"14px 0 4px"}}>
+      {/* slow-spinning celebration rays behind the champion */}
+      <div aria-hidden style={{position:"absolute",left:"50%",top:"38%",width:340,height:340,transform:"translate(-50%,-50%)",background:`conic-gradient(${T.gold}30 0deg,transparent 24deg,${T.gold}18 48deg,transparent 72deg,${T.gold}30 96deg,transparent 120deg,${T.gold}18 144deg,transparent 168deg,${T.gold}30 192deg,transparent 216deg,${T.gold}18 240deg,transparent 264deg,${T.gold}30 288deg,transparent 312deg,${T.gold}18 336deg,transparent 360deg)`,borderRadius:"50%",animation:"bpRaysSpin 14s linear infinite",maskImage:"radial-gradient(circle, #000 30%, transparent 70%)",WebkitMaskImage:"radial-gradient(circle, #000 30%, transparent 70%)",pointerEvents:"none"}}/>
+      <div style={{position:"relative",display:"flex",alignItems:"flex-end",justifyContent:"center",gap:10}}>
+        {defs.map(({idx,h,c,delay})=>{
+          const e=sorted[idx];
+          if(!e) return <div key={idx} style={{width:100}}/>;
+          const pts=scores[e.id]||0;
+          const champ=idx===0;
+          return (
+            <div key={e.id} style={{display:"flex",flexDirection:"column",alignItems:"center",width:106}}>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,animation:`bpPodiumDrop .6s ${delay+0.3}s both`}}>
+                {champ&&<div style={{fontSize:28,marginBottom:-2,animation:"bpFloat 2.6s ease-in-out infinite",filter:`drop-shadow(0 4px 12px ${T.gold}aa)`}}>👑</div>}
+                <Avatar name={e.name} color={e.color} emoji={e.emoji} size={champ?66:48} ring={champ}/>
+                <div style={{fontWeight:900,fontSize:champ?16:13,color:e.color,textAlign:"center",lineHeight:1.15,maxWidth:104,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.name}</div>
+                <div style={{fontSize:12,fontWeight:800,color:T.textDim,lineHeight:1}}><Counter value={pts} delay={(delay+0.45)*1000}/> pts</div>
+              </div>
+              <div style={{width:"100%",height:h,marginTop:8,borderRadius:"12px 12px 5px 5px",background:grad(c),boxShadow:`0 12px 30px -10px ${c}88, inset 0 2px 0 rgba(255,255,255,0.4), inset 0 -10px 18px -10px rgba(0,0,0,0.35)`,display:"flex",alignItems:"flex-start",justifyContent:"center",paddingTop:7,animation:`bpStepUp .5s ${delay}s both`,transformOrigin:"bottom"}}>
+                <span style={{fontFamily:"'Baloo 2','Outfit',sans-serif",fontWeight:800,fontSize:28,color:T.ink,opacity:0.7,lineHeight:1}}>{idx+1}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── END SCREEN (final results + bonus star reveal) ───────────────────────────
 function EndScreen({session,onHome,onUpdate}){
   const isTeam=session.mode==="team";
@@ -2545,7 +2622,7 @@ function EndScreen({session,onHome,onUpdate}){
         <div style={{maxWidth:600,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:18}}>
             <div style={{fontSize:12,fontWeight:800,letterSpacing:"0.22em",color:T.textDim,textTransform:"uppercase",animation:"bpFade .4s both"}}>Before we crown a champion…</div>
-            <div style={{fontSize:34,fontWeight:900,color:T.pink,animation:"bpSlam .55s .1s both"}}>🎭 MISSION DEBRIEF</div>
+            <div style={{fontSize:34,fontWeight:800,color:T.pink,fontFamily:"'Baloo 2','Outfit',sans-serif",animation:"bpSlam .55s .1s both",filter:`drop-shadow(0 0 18px ${T.pink}44)`}}>🎭 MISSION DEBRIEF</div>
             <div style={{fontSize:13,color:T.textDim,marginTop:4}}>Reveal each secret mission out loud. Did they pull it off — or did someone bust them?</div>
           </div>
           <div style={{display:"grid",gap:10}}>
@@ -2579,7 +2656,7 @@ function EndScreen({session,onHome,onUpdate}){
         <div style={{maxWidth:460,width:"100%",textAlign:"center"}}>
           <div style={{fontSize:12,fontWeight:800,letterSpacing:"0.22em",color:T.textDim,textTransform:"uppercase",animation:"bpFade .4s both"}}>Bonus Star {starIdx+1} of {stars.length}</div>
           <div key={star.id} style={{fontSize:80,margin:"14px 0 4px",animation:"bpSpinLand .7s both"}}>{star.emoji}</div>
-          <div style={{fontSize:28,fontWeight:900,color:T.gold,animation:"bpSlam .55s .1s both"}}>{star.name}</div>
+          <div style={{fontSize:28,fontWeight:800,color:T.gold,fontFamily:"'Baloo 2','Outfit',sans-serif",animation:"bpSlam .55s .1s both",filter:`drop-shadow(0 0 16px ${T.gold}44)`}}>{star.name}</div>
           <div style={{fontSize:14,color:T.textDim,marginTop:4,animation:"bpFade .5s .3s both"}}>{star.blurb}</div>
           <div style={{marginTop:24}}>
             {winners.length===0?(
@@ -2604,39 +2681,42 @@ function EndScreen({session,onHome,onUpdate}){
     );
   }
 
-  // PODIUM
+  // PODIUM — award-ceremony reveal: steps rise, 3rd → 2nd → champion
   const champ=sorted[0];
+  const rest=sorted.slice(3);
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(8,6,16,0.97)",zIndex:1100,overflowY:"auto",padding:"30px 16px 28px"}}>
       <Confetti/>
       <div style={{maxWidth:600,margin:"0 auto"}}>
-        <div style={{textAlign:"center",marginBottom:8}}>
+        <div style={{textAlign:"center",marginBottom:4}}>
           <div style={{fontSize:13,fontWeight:800,letterSpacing:"0.22em",color:T.textDim,textTransform:"uppercase",animation:"bpFade .4s both"}}>{session.name}</div>
-          <div style={{fontSize:44,fontWeight:900,color:T.gold,letterSpacing:"-0.03em",animation:"bpSlam .6s .1s both"}}>🏆 CHAMPION</div>
+          <div style={{fontSize:44,fontWeight:800,color:T.gold,letterSpacing:"-0.02em",fontFamily:"'Baloo 2','Outfit',sans-serif",animation:"bpSlam .6s .1s both",filter:`drop-shadow(0 0 24px ${T.gold}55)`}}>🏆 CHAMPION</div>
         </div>
+        <PodiumSteps sorted={sorted} scores={finalScores}/>
         {champ&&(
-          <div style={{textAlign:"center",margin:"10px 0 22px",animation:"bpPop .6s .35s both"}}>
-            {!isTeam&&<div style={{display:"flex",justifyContent:"center",marginBottom:8}}><Avatar name={champ.name} color={champ.color} emoji={champ.emoji} size={80} ring/></div>}
-            <div style={{fontSize:32,fontWeight:900,color:champ.color}}>{champ.name}</div>
-            <div style={{fontSize:14,color:T.textDim}}><Counter value={finalScores[champ.id]||0} delay={450}/> points · {session.rounds.length} rounds played</div>
+          <div style={{textAlign:"center",margin:"14px 0 20px",animation:"bpSlam .55s 2.3s both"}}>
+            <div style={{fontSize:30,fontWeight:900,color:champ.color,fontFamily:"'Baloo 2','Outfit',sans-serif",filter:`drop-shadow(0 0 18px ${champ.color}66)`}}>{champ.name} wins the night!</div>
+            <div style={{fontSize:13,color:T.textDim,marginTop:2}}>{isTeam?session.players.filter(p=>p.teamId===champ.id).map(p=>p.name).join(" · ")+" · ":""}{session.rounds.length} rounds played</div>
           </div>
         )}
-        <div style={{display:"grid",gap:9}}>
-          {sorted.map((e,i)=>{const pts=finalScores[e.id]||0;const base=0.5+i*0.1;return(
-            <div key={e.id} style={{background:T.surface,border:`1.5px solid ${i===0?e.color:T.border}`,borderRadius:15,padding:"12px 15px",animation:"bpCardIn .5s both",animationDelay:`${base}s`,boxShadow:i===0?`0 0 0 1px ${e.color}55, ${T.shadowLg}`:T.shadow}}>
-              <div style={{display:"flex",alignItems:"center",gap:11}}>
-                <span style={{fontSize:22,width:30,textAlign:"center"}}>{medals[i]||i+1}</span>
-                {!isTeam&&<Avatar name={e.name} color={e.color} emoji={e.emoji} size={34} ring={i===0}/>}
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontWeight:800,fontSize:15,color:isTeam?e.color:T.text}}>{e.name}</div>
-                  {isTeam&&<div style={{fontSize:11,color:T.textFaint,marginTop:2}}>{session.players.filter(p=>p.teamId===e.id).map(p=>p.name).join(" · ")}</div>}
-                  <div style={{height:6,background:T.surface2,borderRadius:99,overflow:"hidden",marginTop:6}}><div style={{height:"100%",width:`${Math.round((pts/max)*100)}%`,background:grad(e.color),borderRadius:99,transition:"width .9s cubic-bezier(.2,.8,.2,1)",transitionDelay:`${base}s`}}/></div>
+        {rest.length>0&&(
+          <div style={{display:"grid",gap:9}}>
+            {rest.map((e,i)=>{const pts=finalScores[e.id]||0;const base=2.5+i*0.1;return(
+              <div key={e.id} style={{background:T.surface,border:`1.5px solid ${T.border}`,borderRadius:15,padding:"12px 15px",animation:"bpCardIn .5s both",animationDelay:`${base}s`,boxShadow:T.shadow}}>
+                <div style={{display:"flex",alignItems:"center",gap:11}}>
+                  <span style={{fontSize:18,width:30,textAlign:"center",fontWeight:800,color:T.textFaint}}>{medals[i+3]||i+4}</span>
+                  {!isTeam&&<Avatar name={e.name} color={e.color} emoji={e.emoji} size={34}/>}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:800,fontSize:15,color:isTeam?e.color:T.text}}>{e.name}</div>
+                    {isTeam&&<div style={{fontSize:11,color:T.textFaint,marginTop:2}}>{session.players.filter(p=>p.teamId===e.id).map(p=>p.name).join(" · ")}</div>}
+                    <div style={{height:6,background:T.surface2,borderRadius:99,overflow:"hidden",marginTop:6}}><div style={{height:"100%",width:`${Math.round((pts/max)*100)}%`,background:grad(e.color),borderRadius:99,transition:"width .9s cubic-bezier(.2,.8,.2,1)",transitionDelay:`${base}s`}}/></div>
+                  </div>
+                  <span style={{fontWeight:900,fontSize:25,color:e.color,minWidth:40,textAlign:"right"}}><Counter value={pts} delay={base*1000+200}/></span>
                 </div>
-                <span style={{fontWeight:900,fontSize:25,color:e.color,minWidth:40,textAlign:"right"}}><Counter value={pts} delay={base*1000+200}/></span>
               </div>
-            </div>
-          );})}
-        </div>
+            );})}
+          </div>
+        )}
         <Card style={{marginTop:16,borderColor:T.gold+"33"}}>
           <div style={{fontSize:11,fontWeight:800,color:T.gold,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>🌟 Bonus stars awarded (+2 each)</div>
           <div style={{display:"grid",gap:7}}>
