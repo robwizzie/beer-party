@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import QRCode from "qrcode";
+import { makeClient } from "./sync.js";
 
 /* ============================================================================
    BEER PARTY  —  a real-life Mario-Party-style party game platform.
@@ -476,6 +478,25 @@ function secretMissionPoints(session){
   (session.secretTasks||[]).forEach(t=>{if(t.status==="done")pts[t.playerId]=(pts[t.playerId]||0)+missionValue(t.taskId);});
   return pts;
 }
+// Apply a phone "intent" to the authoritative session on the board (host).
+// Phones never mutate state directly — they ask, the board decides.
+function applyIntent(s,intent){
+  if(!intent||!s)return s;
+  if(intent.type==="claimMission"){
+    return {...s,secretTasks:(s.secretTasks||[]).map(t=>t.playerId!==intent.playerId?t:{...t,status:t.status==="done"?"pending":"done"})};
+  }
+  if(intent.type==="toggleQuest"){
+    return {...s,bonus:(s.bonus||[]).map(b=>(b.bonusId===intent.bonusId&&b.playerId===intent.playerId)?{...b,finished:!b.finished}:b)};
+  }
+  if(intent.type==="reportResult"){
+    // a phone proposes a result for its current match — staged as pendingResult
+    // for the board (host) to confirm. Only the current round is editable.
+    const rounds=s.rounds||[];if(!rounds.length)return s;
+    const last=rounds.length-1;
+    return {...s,rounds:rounds.map((rd,i)=>i!==last?rd:{...rd,matches:rd.matches.map(m=>(m.id!==intent.matchId||m.result)?m:{...m,pendingResult:{result:intent.result,by:intent.by}})})};
+  }
+  return s;
+}
 
 function calcMPScores(s){
   const sc={};s.players.forEach(p=>sc[p.id]=0);
@@ -787,7 +808,191 @@ function RulesModal({game,formatId,onClose}){
   );
 }
 
-export default function App(){ return <Root/>; }
+// Shared global stylesheet (fonts, candy buttons, keyframes, layout) — used by
+// both the board (Root) and the phone companion (PhoneApp).
+const GLOBAL_CSS=`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Baloo+2:wght@500;600;700;800&display=swap');
+        *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+        ::selection{background:${T.purple}55}
+        h1,h2,h3{font-family:'Baloo 2','Outfit',sans-serif}
+        input,select{border:1.5px solid ${T.border2};border-radius:13px;padding:11px 14px;font-size:14px;background:${T.surface2};color:${T.text};font-family:inherit;outline:none;font-weight:600}
+        input::placeholder{color:${T.textFaint}}
+        input:focus,select:focus{border-color:${T.purple};box-shadow:0 0 0 3px ${T.purple}33}
+        select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,${T.textDim} 50%),linear-gradient(135deg,${T.textDim} 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:32px;cursor:pointer}
+        button{font-family:inherit}
+        ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:${T.border2};border-radius:99px}
+        /* glossy candy buttons with a sheen sweep + chunky press */
+        .bp-btn{position:relative;overflow:hidden;transition:transform .08s ease, box-shadow .08s ease, filter .15s ease}
+        .bp-btn::after{content:"";position:absolute;inset:0 0 50% 0;background:linear-gradient(180deg,rgba(255,255,255,0.32),transparent);pointer-events:none;border-radius:inherit}
+        .bp-btn:hover{filter:brightness(1.07) saturate(1.05)}
+        .bp-btn:active{transform:translateY(4px);box-shadow:none !important}
+        .bp-tap{transition:transform .1s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease}
+        .bp-tap:active{transform:scale(0.96)}
+        .bp-card{position:relative;transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease}
+        .bp-card.bp-tap:hover{transform:translateY(-3px);box-shadow:${T.shadowLg}}
+        .bp-dragging{opacity:0.35!important}
+        .bp-drop{outline:2px dashed ${T.purple};outline-offset:2px;background:${T.purple}14!important}
+        @keyframes bpFade{from{opacity:0}to{opacity:1}}
+        @keyframes bpSlam{0%{transform:scale(1.8);opacity:0}55%{transform:scale(0.93)}100%{transform:scale(1);opacity:1}}
+        @keyframes bpPop{0%{transform:scale(0);opacity:0}70%{transform:scale(1.18)}100%{transform:scale(1);opacity:1}}
+        @keyframes bpCardIn{from{transform:translateY(26px);opacity:0}to{transform:translateY(0);opacity:1}}
+        @keyframes bpSpinLand{0%{transform:rotate(-200deg) scale(0.3);opacity:0}70%{transform:rotate(18deg) scale(1.25)}100%{transform:rotate(0deg) scale(1);opacity:1}}
+        @keyframes bpVs{0%,100%{transform:scale(1)}50%{transform:scale(1.22)}}
+        @keyframes bpGlow{0%,100%{box-shadow:0 0 0 0 rgba(255,201,60,0)}50%{box-shadow:0 0 26px 3px rgba(255,201,60,0.45)}}
+        @keyframes bpFloat{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-9px) rotate(2deg)}}
+        @keyframes bpShimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+        @keyframes bpOrbA{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(8vw,5vh) scale(1.12)}}
+        @keyframes bpOrbB{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-7vw,7vh) scale(1.16)}}
+        @keyframes bpOrbC{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(5vw,-6vh) scale(1.1)}}
+        @keyframes bpRise{0%{transform:translateY(0) translateX(0) rotate(0deg);opacity:0}8%{opacity:0.18}90%{opacity:0.16}100%{transform:translateY(-112vh) translateX(var(--drift,0px)) rotate(40deg);opacity:0}}
+        @keyframes bpTokenSpin{from{transform:rotateY(0deg)}to{transform:rotateY(360deg)}}
+        @keyframes bpWheelSpin{from{transform:rotate(0)}to{transform:rotate(var(--turn,1440deg))}}
+        @media(prefers-reduced-motion: reduce){.bp-title{animation:none}}
+        .bp-title{font-family:'Baloo 2','Outfit',sans-serif;background:linear-gradient(100deg,${T.red},${T.gold} 32%,${T.pink} 58%,${T.purple});background-size:200% auto;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:bpShimmer 5s linear infinite;filter:drop-shadow(0 3px 0 rgba(0,0,0,0.25))}
+        /* responsive */
+        .bp-shell{max-width:560px;margin:0 auto;padding:18px 16px 110px;min-height:100vh;position:relative;z-index:1}
+        .bp-grid{display:grid;gap:11px}
+        .bp-center{max-width:560px;margin:0 auto}
+        @media(min-width:720px){
+          .bp-shell{max-width:840px;padding:30px 32px 120px}
+          .bp-grid{grid-template-columns:1fr 1fr;gap:14px}
+          .bp-grid-full{grid-column:1 / -1}
+          .bp-center{max-width:840px}
+        }`;
+const GlobalStyle=()=><style>{GLOBAL_CSS}</style>;
+const ShellBg=({children})=>(
+  <div style={{minHeight:"100vh",position:"relative",background:`radial-gradient(1300px 720px at 50% -12%, ${T.bg2}, ${T.bg} 72%)`,color:T.text,fontFamily:"'Outfit','Helvetica Neue',sans-serif"}}>
+    <GlobalStyle/><PartyBackground/>{children}
+  </div>
+);
+
+// Route to the phone companion when a ?room= code is present; otherwise the board.
+export default function App(){
+  const room=typeof window!=="undefined"&&new URLSearchParams(window.location.search).get("room");
+  if(room) return <PhoneApp code={room.toUpperCase()}/>;
+  return <Root/>;
+}
+
+// ─── PHONE COMPANION (joins a board's room over LAN; one player per phone) ─────
+// read-only leaderboard for phones (board stays the source of truth)
+function PhoneStandings({session}){
+  const isTeam=session.mode==="team";
+  const scores=isTeam?calcTeamScores(session):calcMPScores(session);
+  const ents=isTeam?(session.teams||[]):session.players;
+  const sorted=[...ents].sort((a,b)=>(scores[b.id]||0)-(scores[a.id]||0));
+  const max=Math.max(...Object.values(scores),1);
+  const medals=["🥇","🥈","🥉"];
+  const anyScore=Object.values(scores).some(v=>v>0);
+  return (
+    <div>
+      {!anyScore&&<Card style={{marginBottom:10,textAlign:"center",padding:"14px"}}><Sub>No points yet — play a round! Secret missions & bonus stars stay hidden until the finish.</Sub></Card>}
+      <div style={{display:"grid",gap:8}}>
+        {sorted.map((e,i)=>{const pts=scores[e.id]||0;const c=e.color;return(
+          <Card key={e.id} active={i===0} accent={c} style={{padding:"11px 13px",borderColor:i===0?c:T.border}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:18,width:24,textAlign:"center"}}>{medals[i]||i+1}</span>
+              {!isTeam&&<Avatar name={e.name} color={c} emoji={e.emoji} size={28} ring={i===0}/>}
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:800,fontSize:14,color:isTeam?c:T.text}}>{e.name}</div>
+                <div style={{height:6,background:T.surface2,borderRadius:99,overflow:"hidden",marginTop:5}}><div style={{height:"100%",width:`${Math.round(pts/max*100)}%`,background:grad(c),borderRadius:99}}/></div>
+              </div>
+              <span style={{fontWeight:900,fontSize:22,color:c,minWidth:30,textAlign:"right"}}>{pts}</span>
+            </div>
+          </Card>
+        );})}
+      </div>
+    </div>
+  );
+}
+function PhoneApp({code}){
+  const [session,setSession]=useState(null);
+  const [status,setStatus]=useState("connecting"); // connecting|open|offline|noroom|hostgone
+  const [pid,setPid]=useState(()=>{try{return localStorage.getItem("bp_pid_"+code)||null;}catch{return null;}});
+  const [rules,setRules]=useState(null);
+  const [tab,setTab]=useState("card");          // card | standings
+  const [reporting,setReporting]=useState(null); // match being reported
+  const clientRef=useRef(null);
+  useEffect(()=>{
+    const c=makeClient({role:"phone",code,onStatus:(st)=>setStatus(s=>s==="noroom"?s:st),onMessage:(m)=>{
+      if(m.t==="state"){setSession(m.state);setStatus("open");}
+      else if(m.t==="joined")setStatus("open");
+      else if(m.t==="error"&&m.code==="no_room")setStatus("noroom");
+      else if(m.t==="host_gone")setStatus("hostgone");
+    }});
+    clientRef.current=c;
+    return ()=>c.close();
+  },[code]);
+  const send=(intent)=>clientRef.current&&clientRef.current.send({t:"intent",intent});
+  const player=session&&session.players.find(p=>p.id===pid);
+  const pickMe=(id)=>{setPid(id);try{localStorage.setItem("bp_pid_"+code,id);}catch{}Sound.tap();};
+  const claimMission=(myTask)=>{Sound[myTask.status==="done"?"tap":"success"]();send({type:"claimMission",playerId:pid});};
+  const toggleQuest=(bonusId)=>{Sound.tap();send({type:"toggleQuest",playerId:pid,bonusId});};
+  const reportResult=(match,result)=>{Sound.success();send({type:"reportResult",matchId:match.id,result,by:pid});setReporting(null);};
+
+  const dot=status==="open"?T.green:status==="offline"?T.orange:T.red;
+  const Wrap=({children})=>(
+    <ShellBg>
+      <div style={{maxWidth:480,margin:"0 auto",padding:"16px 14px 40px",position:"relative",zIndex:1}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+          <span className="bp-title" style={{fontSize:22,fontWeight:800}}>🍻 Beer Party</span>
+          <span style={{marginLeft:"auto",display:"inline-flex",alignItems:"center",gap:6,fontSize:11,fontWeight:800,color:T.textDim,background:T.surface2,padding:"5px 10px",borderRadius:999}}>
+            <span style={{width:8,height:8,borderRadius:"50%",background:dot,boxShadow:`0 0 8px ${dot}`}}/>Room {code}
+          </span>
+        </div>
+        {children}
+      </div>
+    </ShellBg>
+  );
+
+  if(status==="noroom") return <Wrap><Card style={{textAlign:"center",padding:"26px 18px"}}><div style={{fontSize:38,marginBottom:8}}>🤔</div><H size={18}>Room {code} isn't live</H><Sub>Ask the host to tap 📺 Go Live on the board, then rescan — or double-check the code.</Sub></Card></Wrap>;
+  if(!session) return <Wrap><Card style={{textAlign:"center",padding:"30px 18px"}}><div style={{fontSize:38,marginBottom:8,animation:"bpFloat 2.5s ease-in-out infinite"}}>📡</div><H size={18}>{status==="offline"?"Reconnecting…":"Connecting…"}</H><Sub>Joining the party on this wifi.</Sub></Card></Wrap>;
+
+  if(!player) return (
+    <Wrap>
+      <H size={20}>Who are you?</H><Sub>Tap your name to grab your card.</Sub>
+      <div className="bp-grid" style={{marginTop:14,gridTemplateColumns:"1fr 1fr"}}>
+        {session.players.map(p=>(
+          <button key={p.id} onClick={()=>pickMe(p.id)} className="bp-tap" style={{display:"flex",alignItems:"center",gap:9,padding:"12px 13px",borderRadius:14,border:`1.5px solid ${p.color}55`,background:p.color+"14",cursor:"pointer",fontFamily:"inherit"}}>
+            <Avatar name={p.name} color={p.color} emoji={p.emoji} size={32}/>
+            <span style={{fontSize:14,fontWeight:800,color:p.color}}>{p.name}</span>
+          </button>
+        ))}
+      </div>
+    </Wrap>
+  );
+
+  const round=(session.rounds||[])[(session.rounds||[]).length-1];
+  const myMatch=round&&round.matches.find(m=>m.playerIds.includes(pid));
+  return (
+    <Wrap>
+      <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:12}}>
+        <Avatar name={player.name} color={player.color} emoji={player.emoji} size={44} ring/>
+        <div style={{flex:1}}><div style={{fontWeight:900,fontSize:18,color:T.text}}>{player.name}</div><div style={{fontSize:12,color:T.textDim}}>Your card</div></div>
+        <button onClick={()=>setPid(null)} className="bp-tap" style={{background:T.surface2,border:`1.5px solid ${T.border2}`,borderRadius:11,padding:"7px 11px",cursor:"pointer",color:T.textDim,fontSize:12,fontWeight:700,fontFamily:"inherit"}}>↩ Not you?</button>
+      </div>
+      {status==="hostgone"&&<Card style={{marginBottom:12,borderColor:T.orange+"55",background:T.orange+"12"}}><div style={{fontSize:13,color:T.orange,fontWeight:700}}>⚠ Lost the board — waiting for it to come back…</div></Card>}
+      <div style={{marginBottom:14}}><Tabs tabs={[["card","🎭 My Card"],["standings","📊 Standings"]]} active={tab} onChange={setTab}/></div>
+      {tab==="card"?(
+        <div>
+          <PlayerCardBody key={pid} session={session} pid={pid} onClaim={claimMission} onToggleQuest={toggleQuest} onRules={(g,f)=>setRules({game:g,formatId:f})}/>
+          {myMatch&&!myMatch.result&&(
+            <div style={{marginTop:14}}>
+              {myMatch.pendingResult?(
+                <div style={{padding:"11px 13px",borderRadius:12,background:T.blue+"12",border:`1.5px solid ${T.blue}44`,fontSize:12.5,color:T.blue,fontWeight:700,textAlign:"center"}}>📲 Result reported — waiting for the host to confirm.</div>
+              ):(
+                <Btn full color={T.blue} variant="soft" onClick={()=>{Sound.tap();setReporting(myMatch);}}>📲 Report this game's result</Btn>
+              )}
+              <div style={{fontSize:11,color:T.textFaint,textAlign:"center",marginTop:7}}>Saves the host a trip — they just confirm it on the board.</div>
+            </div>
+          )}
+        </div>
+      ):(
+        <PhoneStandings session={session}/>
+      )}
+      {reporting&&<Recorder match={reporting} session={session} onCancel={()=>setReporting(null)} onSave={(r)=>reportResult(reporting,r)}/>}
+      {rules&&<RulesModal game={rules.game} formatId={rules.formatId} onClose={()=>setRules(null)}/>}
+    </Wrap>
+  );
+}
 
 // ─── MODE SELECT ──────────────────────────────────────────────────────────────
 function ModeSelect({onSelect,onBack}){
@@ -1460,7 +1665,7 @@ function RoundEditor({session,round,onSave,onClose,onRules}){
 
 
 // ─── MATCH CARD ───────────────────────────────────────────────────────────────
-function MatchCard({match,session,onRecord,onRules}){
+function MatchCard({match,session,onRecord,onRules,onConfirmPending}){
   const game=GAMES[match.gameId];const fmt=FORMATS[match.formatId];
   const pl=id=>session.players.find(p=>p.id===id);
   const done=!!match.result;
@@ -1512,7 +1717,17 @@ function MatchCard({match,session,onRecord,onRules}){
       )}
 
       <div style={{fontSize:11,color:T.textFaint,marginBottom:done?0:11}}>{fmt.pts}</div>
-      {!done&&<Btn color={fmt.color} variant="soft" full onClick={()=>onRecord(match)}>Record result</Btn>}
+      {!done&&match.pendingResult&&(
+        <div style={{marginBottom:10,padding:"10px 12px",borderRadius:12,background:T.blue+"12",border:`1.5px solid ${T.blue}55`}}>
+          <div style={{fontSize:11,fontWeight:800,color:T.blue,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}}>📲 Reported by {pl(match.pendingResult.by)?.name||"a phone"}</div>
+          <ResultSummary match={{...match,result:match.pendingResult.result}} session={session}/>
+          <div style={{display:"flex",gap:7,marginTop:10}}>
+            <Btn color={T.green} onClick={()=>onConfirmPending&&onConfirmPending(match.id)} style={{flex:2,padding:"9px"}}>✓ Confirm</Btn>
+            <Btn variant="soft" color={fmt.color} onClick={()=>onRecord(match)} style={{flex:1,padding:"9px"}}>Adjust</Btn>
+          </div>
+        </div>
+      )}
+      {!done&&!match.pendingResult&&<Btn color={fmt.color} variant="soft" full onClick={()=>onRecord(match)}>Record result</Btn>}
       {done&&<ResultSummary match={match} session={session}/>}
     </Card>
   );
@@ -1594,14 +1809,42 @@ function Recorder({match,session,onSave,onCancel}){
   );
 }
 
+// ─── LIVE / PHONE COMPANION (board side) ──────────────────────────────────────
+function QRImg({text,size=146}){
+  const [src,setSrc]=useState(null);
+  useEffect(()=>{let on=true;QRCode.toDataURL(text,{width:size,margin:1,color:{dark:"#11101F",light:"#FBFBFF"}}).then(d=>{if(on)setSrc(d);}).catch(()=>{});return()=>{on=false;};},[text,size]);
+  return src?<img src={src} alt="Join QR" width={size} height={size} style={{display:"block",borderRadius:10}}/>:<div style={{width:size,height:size,borderRadius:10,background:T.surface2}}/>;
+}
+function LiveBanner({live,onEnd}){
+  const url=`http://${live.ip}:${live.port}/?room=${live.code}`;
+  return (
+    <Card style={{marginBottom:12,borderColor:T.blue+"55",background:`linear-gradient(135deg, ${T.blue}16, ${T.surface})`}}>
+      <div style={{display:"flex",gap:14,alignItems:"center",flexWrap:"wrap"}}>
+        <div style={{background:"#fff",padding:7,borderRadius:13,flexShrink:0}}><QRImg text={url}/></div>
+        <div style={{flex:1,minWidth:170}}>
+          <div style={{fontSize:11,fontWeight:800,color:T.blue,textTransform:"uppercase",letterSpacing:"0.07em"}}>📺 Phones can join</div>
+          <div style={{fontSize:12.5,color:T.textDim,margin:"4px 0 7px"}}>Same wifi → scan the QR, or open <b style={{color:T.text}}>{live.ip}:{live.port}</b> and enter the room code.</div>
+          <div style={{display:"flex",alignItems:"center",gap:9}}>
+            <span style={{fontSize:11,color:T.textFaint,textTransform:"uppercase",fontWeight:800}}>Room</span>
+            <span style={{fontWeight:800,fontSize:24,letterSpacing:"0.16em",color:T.gold,fontFamily:"'Baloo 2',sans-serif"}}>{live.code}</span>
+            <span style={{marginLeft:"auto",fontSize:12,fontWeight:800,color:T.green}}>● {live.count} joined</span>
+          </div>
+          <Btn variant="ghost" onClick={onEnd} style={{marginTop:10,fontSize:12,padding:"7px 12px"}}>End live</Btn>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 // ─── MY CARD (personal Among-Us-style hub: assignment + secret mission + quests) ─
 const DIFF_COLOR={easy:T.green,medium:T.gold,hard:T.red};
-function MyCardModal({session,onUpdate,onClose,onRules}){
-  const [pid,setPid]=useState(null);
+// Reusable card body — identical on the shared device (My Card) and on a phone.
+// Handlers are injected so the same UI can call onUpdate (board) or send an
+// intent over the wire (phone).
+function PlayerCardBody({session,pid,onClaim,onToggleQuest,onRules}){
   const [revealed,setRevealed]=useState(false);
   const player=session.players.find(p=>p.id===pid);
-
-  // find this player's current-round assignment
+  if(!player)return null;
   const round=(session.rounds||[])[(session.rounds||[]).length-1];
   const myMatch=round&&round.matches.find(m=>m.playerIds.includes(pid));
   const benched=round&&!myMatch;
@@ -1612,24 +1855,78 @@ function MyCardModal({session,onUpdate,onClose,onRules}){
     if(f.id==="one_v_all")return myTeam==="solo"?"👑 The One":"The Rest";
     return null;
   })();
-
-  // secret mission for this player
   const myTask=(session.secretTasks||[]).find(t=>t.playerId===pid);
   const mission=myTask&&MISSION_BY_ID[myTask.taskId];
-  const claimMission=()=>{
+  const quests=(session.bonusTypes||[]).map(id=>SIDE_QUESTS[id]).filter(Boolean);
+  const questDone=(bonusId)=>session.bonus?.find(b=>b.bonusId===bonusId&&b.playerId===pid)?.finished;
+  return (
+    <div>
+      {/* THIS ROUND */}
+      <div style={{fontSize:11,fontWeight:800,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:7}}>🎲 This round</div>
+      {myMatch?(()=>{const g=GAMES[myMatch.gameId];const f=FORMATS[myMatch.formatId];return(
+        <div style={{display:"flex",alignItems:"center",gap:11,padding:"12px 14px",borderRadius:14,background:f.color+"12",border:`1.5px solid ${f.color}44`,marginBottom:16}}>
+          <span style={{fontSize:28}}>{g.emoji}</span>
+          <div style={{flex:1}}><div style={{fontWeight:800,fontSize:15,color:T.text}}>{g.name}</div><div style={{fontSize:12,fontWeight:700,color:f.color}}>{f.icon} {f.label}{teamLabel?` · ${teamLabel}`:""}</div></div>
+          {onRules&&<button onClick={()=>onRules(g,myMatch.formatId)} className="bp-tap" style={{background:T.surface2,border:"none",borderRadius:10,padding:"7px 11px",fontSize:12,fontWeight:700,color:T.textDim,cursor:"pointer",fontFamily:"inherit"}}>Rules</button>}
+        </div>
+      );})():(
+        <div style={{padding:"12px 14px",borderRadius:14,background:T.surface2,border:`1px solid ${T.border}`,marginBottom:16,fontSize:13,color:T.textDim}}>{benched?"🪑 On deck this round — you ref, then rotate in next deal.":"No round dealt yet — sit tight!"}</div>
+      )}
+
+      {/* SECRET MISSION */}
+      {session.secretTasksOn&&mission&&(
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:800,color:T.pink,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:7}}>🎭 Your secret mission</div>
+          {!revealed?(
+            <button onClick={()=>{Sound.pop();setRevealed(true);}} className="bp-tap" style={{width:"100%",padding:"22px 16px",borderRadius:16,border:`2px dashed ${T.pink}66`,background:T.pink+"10",cursor:"pointer",fontFamily:"inherit",color:T.pink}}>
+              <div style={{fontSize:26,marginBottom:4}}>🙈</div>
+              <div style={{fontSize:14,fontWeight:800}}>Tap to reveal — make sure nobody's looking!</div>
+            </button>
+          ):(
+            <div style={{padding:"15px 16px",borderRadius:16,background:T.pink+"12",border:`1.5px solid ${T.pink}55`}}>
+              <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:7}}>
+                <span style={{fontSize:26}}>{mission.emoji}</span>
+                <span style={{fontWeight:900,fontSize:16,color:T.text,flex:1}}>{mission.name}</span>
+                <Pill color={DIFF_COLOR[mission.diff]}>{mission.diff} · +{SECRET_POINTS[mission.diff]}</Pill>
+              </div>
+              <div style={{fontSize:13.5,color:T.text,lineHeight:1.5,marginBottom:12}}>{mission.desc}</div>
+              <Btn full color={myTask.status==="done"?T.green:T.pink} variant={myTask.status==="done"?"solid":"soft"} onClick={()=>onClaim(myTask)}>{myTask.status==="done"?"✅ Marked done — confirmed at the reveal":"I pulled it off 😏"}</Btn>
+              <div style={{fontSize:11,color:T.textFaint,textAlign:"center",marginTop:8}}>The group confirms (or busts you) at the final reveal. Then hide it again!</div>
+              <Btn full variant="ghost" onClick={()=>setRevealed(false)} style={{marginTop:8,fontSize:12,padding:"8px"}}>🙈 Hide mission</Btn>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* SIDE QUESTS */}
+      {quests.length>0&&(
+        <div style={{marginBottom:6}}>
+          <div style={{fontSize:11,fontWeight:800,color:T.gold,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:7}}>🏅 Side quests — optional, anytime</div>
+          <div style={{display:"grid",gap:7}}>
+            {quests.map(q=>{const done=questDone(q.id);return(
+              <button key={q.id} onClick={()=>onToggleQuest(q.id)} className="bp-tap" style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:12,border:`1.5px solid ${done?T.green+"66":T.border}`,background:done?T.green+"12":T.surface2,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                <span style={{fontSize:20}}>{q.emoji}</span>
+                <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:T.text}}>{q.name}</div><div style={{fontSize:11,color:T.textFaint}}>{q.desc}</div></div>
+                <span style={{fontSize:18,color:done?T.green:T.textFaint}}>{done?"✅":"⬜"}</span>
+              </button>
+            );})}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+function MyCardModal({session,onUpdate,onClose,onRules}){
+  const [pid,setPid]=useState(null);
+  const player=session.players.find(p=>p.id===pid);
+  const claimMission=(myTask)=>{
     const next=myTask.status==="done"?"pending":"done";
     onUpdate({...session,secretTasks:session.secretTasks.map(t=>t.playerId!==pid?t:{...t,status:next})});
     Sound[next==="done"?"success":"tap"]();
   };
-
-  // side quests for this player
-  const quests=(session.bonusTypes||[]).map(id=>SIDE_QUESTS[id]).filter(Boolean);
   const toggleQuest=(bonusId)=>{
-    const bonus=session.bonus.map(b=>(b.bonusId===bonusId&&b.playerId===pid)?{...b,finished:!b.finished}:b);
-    onUpdate({...session,bonus});Sound.tap();
+    onUpdate({...session,bonus:session.bonus.map(b=>(b.bonusId===bonusId&&b.playerId===pid)?{...b,finished:!b.finished}:b)});Sound.tap();
   };
-  const questDone=(bonusId)=>session.bonus.find(b=>b.bonusId===bonusId&&b.playerId===pid)?.finished;
-
   return (
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(7,5,14,0.92)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:1200,padding:"16px",overflowY:"auto"}}>
       <div onClick={e=>e.stopPropagation()} style={{background:T.surface,border:`1.5px solid ${T.border2}`,borderRadius:22,maxWidth:480,width:"100%",padding:"22px",boxShadow:T.shadowLg,marginTop:10,marginBottom:20}}>
@@ -1639,10 +1936,10 @@ function MyCardModal({session,onUpdate,onClose,onRules}){
               <H size={21}>🎭 My Card</H>
               <button onClick={onClose} className="bp-tap" style={{background:T.surface2,border:`1.5px solid ${T.border2}`,borderRadius:12,width:34,height:34,cursor:"pointer",color:T.textDim,fontSize:16,fontFamily:"inherit"}}>✕</button>
             </div>
-            <Sub>Hand the phone over and tap your name — your mission stays secret.</Sub>
+            <Sub>Hand the phone over and tap your name — your mission stays secret. (Or have everyone join from their own phone with 📺 Go Live.)</Sub>
             <div className="bp-grid" style={{marginTop:16,gridTemplateColumns:"1fr 1fr"}}>
               {session.players.map(p=>(
-                <button key={p.id} onClick={()=>{Sound.tap();setPid(p.id);setRevealed(false);}} className="bp-tap" style={{display:"flex",alignItems:"center",gap:9,padding:"11px 13px",borderRadius:14,border:`1.5px solid ${p.color}55`,background:p.color+"14",cursor:"pointer",fontFamily:"inherit"}}>
+                <button key={p.id} onClick={()=>{Sound.tap();setPid(p.id);}} className="bp-tap" style={{display:"flex",alignItems:"center",gap:9,padding:"11px 13px",borderRadius:14,border:`1.5px solid ${p.color}55`,background:p.color+"14",cursor:"pointer",fontFamily:"inherit"}}>
                   <Avatar name={p.name} color={p.color} emoji={p.emoji} size={30}/>
                   <span style={{fontSize:14,fontWeight:800,color:p.color}}>{p.name}</span>
                 </button>
@@ -1656,59 +1953,7 @@ function MyCardModal({session,onUpdate,onClose,onRules}){
               <div style={{flex:1}}><div style={{fontWeight:900,fontSize:18,color:T.text}}>{player.name}'s Card</div><div style={{fontSize:12,color:T.textDim}}>Your private mission board</div></div>
               <button onClick={()=>setPid(null)} className="bp-tap" title="Not you?" style={{background:T.surface2,border:`1.5px solid ${T.border2}`,borderRadius:11,padding:"7px 11px",cursor:"pointer",color:T.textDim,fontSize:12,fontWeight:700,fontFamily:"inherit"}}>↩ Not you?</button>
             </div>
-
-            {/* THIS ROUND */}
-            <div style={{fontSize:11,fontWeight:800,color:T.textFaint,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:7}}>🎲 This round</div>
-            {myMatch?(()=>{const g=GAMES[myMatch.gameId];const f=FORMATS[myMatch.formatId];return(
-              <div style={{display:"flex",alignItems:"center",gap:11,padding:"12px 14px",borderRadius:14,background:f.color+"12",border:`1.5px solid ${f.color}44`,marginBottom:16}}>
-                <span style={{fontSize:28}}>{g.emoji}</span>
-                <div style={{flex:1}}><div style={{fontWeight:800,fontSize:15,color:T.text}}>{g.name}</div><div style={{fontSize:12,fontWeight:700,color:f.color}}>{f.icon} {f.label}{teamLabel?` · ${teamLabel}`:""}</div></div>
-                <button onClick={()=>onRules(g,myMatch.formatId)} className="bp-tap" style={{background:T.surface2,border:"none",borderRadius:10,padding:"7px 11px",fontSize:12,fontWeight:700,color:T.textDim,cursor:"pointer",fontFamily:"inherit"}}>Rules</button>
-              </div>
-            );})():(
-              <div style={{padding:"12px 14px",borderRadius:14,background:T.surface2,border:`1px solid ${T.border}`,marginBottom:16,fontSize:13,color:T.textDim}}>{benched?"🪑 On deck this round — you ref, then rotate in next deal.":"No round dealt yet — sit tight!"}</div>
-            )}
-
-            {/* SECRET MISSION */}
-            {session.secretTasksOn&&mission&&(
-              <div style={{marginBottom:16}}>
-                <div style={{fontSize:11,fontWeight:800,color:T.pink,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:7}}>🎭 Your secret mission</div>
-                {!revealed?(
-                  <button onClick={()=>{Sound.pop();setRevealed(true);}} className="bp-tap" style={{width:"100%",padding:"22px 16px",borderRadius:16,border:`2px dashed ${T.pink}66`,background:T.pink+"10",cursor:"pointer",fontFamily:"inherit",color:T.pink}}>
-                    <div style={{fontSize:26,marginBottom:4}}>🙈</div>
-                    <div style={{fontSize:14,fontWeight:800}}>Tap to reveal — make sure nobody's looking!</div>
-                  </button>
-                ):(
-                  <div style={{padding:"15px 16px",borderRadius:16,background:T.pink+"12",border:`1.5px solid ${T.pink}55`}}>
-                    <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:7}}>
-                      <span style={{fontSize:26}}>{mission.emoji}</span>
-                      <span style={{fontWeight:900,fontSize:16,color:T.text,flex:1}}>{mission.name}</span>
-                      <Pill color={DIFF_COLOR[mission.diff]}>{mission.diff} · +{SECRET_POINTS[mission.diff]}</Pill>
-                    </div>
-                    <div style={{fontSize:13.5,color:T.text,lineHeight:1.5,marginBottom:12}}>{mission.desc}</div>
-                    <Btn full color={myTask.status==="done"?T.green:T.pink} variant={myTask.status==="done"?"solid":"soft"} onClick={claimMission}>{myTask.status==="done"?"✅ Marked done — confirmed at the reveal":"I pulled it off 😏"}</Btn>
-                    <div style={{fontSize:11,color:T.textFaint,textAlign:"center",marginTop:8}}>The group confirms (or busts you) at the final reveal. Then hide it again!</div>
-                    <Btn full variant="ghost" onClick={()=>setRevealed(false)} style={{marginTop:8,fontSize:12,padding:"8px"}}>🙈 Hide mission</Btn>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* SIDE QUESTS */}
-            {quests.length>0&&(
-              <div style={{marginBottom:6}}>
-                <div style={{fontSize:11,fontWeight:800,color:T.gold,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:7}}>🏅 Side quests — optional, anytime</div>
-                <div style={{display:"grid",gap:7}}>
-                  {quests.map(q=>{const done=questDone(q.id);return(
-                    <button key={q.id} onClick={()=>toggleQuest(q.id)} className="bp-tap" style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:12,border:`1.5px solid ${done?T.green+"66":T.border}`,background:done?T.green+"12":T.surface2,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-                      <span style={{fontSize:20}}>{q.emoji}</span>
-                      <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:T.text}}>{q.name}</div><div style={{fontSize:11,color:T.textFaint}}>{q.desc}</div></div>
-                      <span style={{fontSize:18,color:done?T.green:T.textFaint}}>{done?"✅":"⬜"}</span>
-                    </button>
-                  );})}
-                </div>
-              </div>
-            )}
+            <PlayerCardBody key={pid} session={session} pid={pid} onClaim={claimMission} onToggleQuest={toggleQuest} onRules={onRules}/>
             <Btn full color={T.gold} onClick={onClose} style={{marginTop:14}}>Done — pass it on 👋</Btn>
           </div>
         )}
@@ -1730,6 +1975,9 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
   const [editing,setEditing]=useState(false);      // show round editor
   const [dice,setDice]=useState(null);            // pending reveal during dice roll
   const [showCard,setShowCard]=useState(false);   // personal "My Card" hub
+  const [live,setLive]=useState(null);            // {code,ip,port,count} when broadcasting to phones
+  const clientRef=useRef(null);
+  const sessionRef=useRef(session); sessionRef.current=session; // latest state for the intent handler
   const isTeam=mode==="team";
   const scores=isTeam?calcTeamScores(session):calcMPScores(session);
   const rounds=session.rounds||[];
@@ -1755,9 +2003,15 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
     setDice({round,label:`${VOTE_OPTIONS[voteId]?.label||"Round"} — let's go!`});
   };
   const saveResult=(roundIdx,matchId,result)=>{
-    const newRounds=session.rounds.map((rd,i)=>i!==roundIdx?rd:{...rd,matches:rd.matches.map(m=>m.id===matchId?{...m,result}:m)});
+    const newRounds=session.rounds.map((rd,i)=>i!==roundIdx?rd:{...rd,matches:rd.matches.map(m=>m.id===matchId?{...m,result,pendingResult:undefined}:m)});
     onUpdate({...session,rounds:newRounds});
     setRecording(null);
+  };
+  // host confirms a phone-reported result, committing it to the official record
+  const confirmPending=(matchId)=>{
+    Sound.success();
+    const idx=rounds.length-1;
+    onUpdate({...session,rounds:session.rounds.map((rd,i)=>i!==idx?rd:{...rd,matches:rd.matches.map(m=>(m.id!==matchId||!m.pendingResult)?m:{...m,result:m.pendingResult.result,pendingResult:undefined})})});
   };
   const reshuffleRound=(roundIdx)=>{
     Sound.deal();
@@ -1779,6 +2033,22 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
   const nextAfterStandings=()=>{ setStandingsReveal(null); if(!atTarget) dealRound(); };
   const setTarget=(n)=>onUpdate({...session,targetRounds:n});
 
+  // ── Go Live: open a phone-companion room (this board stays source of truth) ──
+  const goLive=()=>{
+    if(clientRef.current)return;
+    Sound.advance();
+    clientRef.current=makeClient({role:"host",onMessage:(m)=>{
+      if(m.t==="hosted")setLive({code:m.code,ip:m.ip,port:m.port,count:0});
+      else if(m.t==="presence")setLive(l=>l?{...l,count:m.count}:l);
+      else if(m.t==="intent")onUpdate(applyIntent(sessionRef.current,m.intent));
+    }});
+  };
+  const endLive=()=>{Sound.tap();if(clientRef.current){clientRef.current.close();clientRef.current=null;}setLive(null);};
+  // keep phones in sync with the authoritative state
+  useEffect(()=>{ if(live&&clientRef.current) clientRef.current.send({t:"state",state:session}); },[session,live]);
+  // tidy up the socket if the session screen unmounts
+  useEffect(()=>()=>{ if(clientRef.current){clientRef.current.close();clientRef.current=null;} },[]);
+
   return (
     <div>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
@@ -1786,12 +2056,14 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
           <div style={{display:"flex",alignItems:"center",gap:7}}><Pill color={T.red} solid>● Live</Pill><span style={{fontWeight:900,fontSize:16,color:T.text}}>{session.name}</span></div>
           <div style={{fontSize:12,color:T.textDim,marginTop:2}}>{mode==="party"?"🎉 Party":isTeam?"🏆 Teams":"🕹️ Free Play"} · {session.players.length} players{target!=null?` · round ${Math.min(roundsDone||1,target)} of ${target}`:` · ${roundsDone} rounds`}</div>
         </div>
-        <div style={{display:"flex",gap:6}}>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+          {mode!=="freeplay"&&<Btn color={T.blue} variant="soft" onClick={live?endLive:goLive} style={{fontSize:12,padding:"6px 11px"}}>{live?"📺 Live":"📺 Go Live"}</Btn>}
           {mode!=="freeplay"&&<Btn color={T.pink} variant="soft" onClick={()=>{Sound.tap();setShowCard(true);}} style={{fontSize:12,padding:"6px 11px"}}>🎭 My Card</Btn>}
           {mode!=="freeplay"&&<Btn variant="ghost" onClick={()=>setShowSettings(true)} style={{fontSize:12,padding:"6px 10px"}}>⚙</Btn>}
           <Btn variant="ghost" onClick={onEnd} style={{fontSize:12,padding:"6px 11px"}}>Exit</Btn>
         </div>
       </div>
+      {live&&<LiveBanner live={live} onEnd={endLive}/>}
 
       {target!=null&&(
         <div style={{display:"flex",gap:3,marginBottom:12}}>
@@ -1828,7 +2100,7 @@ function Session({session,onUpdate,onEnd,onFinish,mode}){
                       </div>
                     </div>
                     <div className="bp-grid">
-                      {currentRound.matches.map(m=><MatchCard key={m.id} match={m} session={session} onRules={showRules} onRecord={(match)=>setRecording({roundIdx:rounds.length-1,match})}/>)}
+                      {currentRound.matches.map(m=><MatchCard key={m.id} match={m} session={session} onRules={showRules} onConfirmPending={confirmPending} onRecord={(match)=>setRecording({roundIdx:rounds.length-1,match})}/>)}
                     </div>
                     {currentRound.benched?.length>0&&(
                       <Card style={{marginTop:10,borderColor:T.gold+"44",background:T.gold+"0c"}}>
@@ -2555,55 +2827,7 @@ function Root(){
 
   return (
     <div style={{minHeight:"100vh",position:"relative",background:`radial-gradient(1300px 720px at 50% -12%, ${T.bg2}, ${T.bg} 72%)`,color:T.text,fontFamily:"'Outfit','Helvetica Neue',sans-serif"}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Baloo+2:wght@500;600;700;800&display=swap');
-        *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-        ::selection{background:${T.purple}55}
-        h1,h2,h3{font-family:'Baloo 2','Outfit',sans-serif}
-        input,select{border:1.5px solid ${T.border2};border-radius:13px;padding:11px 14px;font-size:14px;background:${T.surface2};color:${T.text};font-family:inherit;outline:none;font-weight:600}
-        input::placeholder{color:${T.textFaint}}
-        input:focus,select:focus{border-color:${T.purple};box-shadow:0 0 0 3px ${T.purple}33}
-        select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,${T.textDim} 50%),linear-gradient(135deg,${T.textDim} 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:32px;cursor:pointer}
-        button{font-family:inherit}
-        ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:${T.border2};border-radius:99px}
-        /* glossy candy buttons with a sheen sweep + chunky press */
-        .bp-btn{position:relative;overflow:hidden;transition:transform .08s ease, box-shadow .08s ease, filter .15s ease}
-        .bp-btn::after{content:"";position:absolute;inset:0 0 50% 0;background:linear-gradient(180deg,rgba(255,255,255,0.32),transparent);pointer-events:none;border-radius:inherit}
-        .bp-btn:hover{filter:brightness(1.07) saturate(1.05)}
-        .bp-btn:active{transform:translateY(4px);box-shadow:none !important}
-        .bp-tap{transition:transform .1s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease}
-        .bp-tap:active{transform:scale(0.96)}
-        .bp-card{position:relative;transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease}
-        .bp-card.bp-tap:hover{transform:translateY(-3px);box-shadow:${T.shadowLg}}
-        .bp-dragging{opacity:0.35!important}
-        .bp-drop{outline:2px dashed ${T.purple};outline-offset:2px;background:${T.purple}14!important}
-        @keyframes bpFade{from{opacity:0}to{opacity:1}}
-        @keyframes bpSlam{0%{transform:scale(1.8);opacity:0}55%{transform:scale(0.93)}100%{transform:scale(1);opacity:1}}
-        @keyframes bpPop{0%{transform:scale(0);opacity:0}70%{transform:scale(1.18)}100%{transform:scale(1);opacity:1}}
-        @keyframes bpCardIn{from{transform:translateY(26px);opacity:0}to{transform:translateY(0);opacity:1}}
-        @keyframes bpSpinLand{0%{transform:rotate(-200deg) scale(0.3);opacity:0}70%{transform:rotate(18deg) scale(1.25)}100%{transform:rotate(0deg) scale(1);opacity:1}}
-        @keyframes bpVs{0%,100%{transform:scale(1)}50%{transform:scale(1.22)}}
-        @keyframes bpGlow{0%,100%{box-shadow:0 0 0 0 rgba(255,201,60,0)}50%{box-shadow:0 0 26px 3px rgba(255,201,60,0.45)}}
-        @keyframes bpFloat{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-9px) rotate(2deg)}}
-        @keyframes bpShimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
-        @keyframes bpOrbA{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(8vw,5vh) scale(1.12)}}
-        @keyframes bpOrbB{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-7vw,7vh) scale(1.16)}}
-        @keyframes bpOrbC{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(5vw,-6vh) scale(1.1)}}
-        @keyframes bpRise{0%{transform:translateY(0) translateX(0) rotate(0deg);opacity:0}8%{opacity:0.18}90%{opacity:0.16}100%{transform:translateY(-112vh) translateX(var(--drift,0px)) rotate(40deg);opacity:0}}
-        @keyframes bpTokenSpin{from{transform:rotateY(0deg)}to{transform:rotateY(360deg)}}
-        @keyframes bpWheelSpin{from{transform:rotate(0)}to{transform:rotate(var(--turn,1440deg))}}
-        @media(prefers-reduced-motion: reduce){.bp-title{animation:none}}
-        .bp-title{font-family:'Baloo 2','Outfit',sans-serif;background:linear-gradient(100deg,${T.red},${T.gold} 32%,${T.pink} 58%,${T.purple});background-size:200% auto;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:bpShimmer 5s linear infinite;filter:drop-shadow(0 3px 0 rgba(0,0,0,0.25))}
-        /* responsive */
-        .bp-shell{max-width:560px;margin:0 auto;padding:18px 16px 110px;min-height:100vh;position:relative;z-index:1}
-        .bp-grid{display:grid;gap:11px}
-        .bp-center{max-width:560px;margin:0 auto}
-        @media(min-width:720px){
-          .bp-shell{max-width:840px;padding:30px 32px 120px}
-          .bp-grid{grid-template-columns:1fr 1fr;gap:14px}
-          .bp-grid-full{grid-column:1 / -1}
-          .bp-center{max-width:840px}
-        }
-      `}</style>
+      <GlobalStyle/>
       <PartyBackground/>
       <button onClick={()=>{Sound.tap();setShowAudio(true);}} className="bp-tap" title="Sound settings" style={{position:"fixed",top:14,right:14,zIndex:60,width:42,height:42,borderRadius:13,border:`1.5px solid ${T.border2}`,background:T.surface+"e8",backdropFilter:"blur(10px)",WebkitBackdropFilter:"blur(10px)",cursor:"pointer",fontSize:18,boxShadow:T.shadow}}>{settings.sfx||settings.music?"🔊":"🔈"}</button>
       <div className="bp-shell">
